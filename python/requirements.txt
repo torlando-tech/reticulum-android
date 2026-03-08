@@ -1,0 +1,3 @@
+rns @ git+https://github.com/torlando-tech/Reticulum@fix/socket-leak-1.1.3
+cryptography>=42.0.0
+lxmf
