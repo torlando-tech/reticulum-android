@@ -12,6 +12,9 @@ object ConfigGenerator {
         appendLine("[reticulum]")
         appendLine("  enable_transport = $transportEnabled")
         appendLine("  share_instance = $shareInstance")
+        if (shareInstance) {
+            appendLine("  shared_instance_type = tcp")
+        }
         appendLine()
         appendLine("[logging]")
         appendLine("  loglevel = 4")

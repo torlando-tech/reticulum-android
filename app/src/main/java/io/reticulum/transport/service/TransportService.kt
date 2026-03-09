@@ -5,9 +5,11 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.os.Binder
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.reticulum.transport.MainActivity
@@ -18,6 +20,7 @@ import io.reticulum.transport.data.DiscoveredInterface
 import io.reticulum.transport.data.InterfaceConfig
 import io.reticulum.transport.data.InterfaceStats
 import io.reticulum.transport.data.PathEntry
+import io.reticulum.transport.data.PreferencesManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -27,6 +30,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class TransportService : Service() {
@@ -49,6 +53,8 @@ class TransportService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var binding: ReticulumBinding? = null
     private var statsJob: Job? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+    private lateinit var prefs: PreferencesManager
 
     private val _serviceState = MutableStateFlow<ServiceState>(ServiceState.Stopped)
     val serviceState: StateFlow<ServiceState> = _serviceState.asStateFlow()
@@ -75,6 +81,7 @@ class TransportService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        prefs = PreferencesManager(this)
         createNotificationChannel()
     }
 
@@ -83,6 +90,17 @@ class TransportService : Service() {
             ACTION_STOP -> {
                 stopTransport()
                 stopSelf()
+            }
+            else -> {
+                // Must call startForeground() promptly after startForegroundService()
+                startForeground(NOTIFICATION_ID, createNotification("Starting..."))
+
+                // Start transport if not already running (handles both fresh start and system restart)
+                if (_serviceState.value !is ServiceState.Running &&
+                    _serviceState.value !is ServiceState.Starting
+                ) {
+                    startTransportFromPrefs()
+                }
             }
         }
         return START_STICKY
@@ -94,15 +112,27 @@ class TransportService : Service() {
         super.onDestroy()
     }
 
+    private fun startTransportFromPrefs() {
+        serviceScope.launch {
+            val transportEnabled = prefs.transportEnabled.first()
+            val shareInstance = prefs.shareInstance.first()
+            val interfacesJson = prefs.interfacesJson.first()
+            val interfaces = InterfaceConfig.fromJson(interfacesJson)
+            startTransport(transportEnabled, shareInstance, interfaces)
+        }
+    }
+
     fun startTransport(
         transportEnabled: Boolean,
         shareInstance: Boolean,
         interfaces: List<InterfaceConfig>,
     ) {
-        if (_serviceState.value is ServiceState.Running || _serviceState.value is ServiceState.Stopping) return
+        if (_serviceState.value is ServiceState.Running || _serviceState.value is ServiceState.Starting ||
+            _serviceState.value is ServiceState.Stopping
+        ) return
 
         _serviceState.value = ServiceState.Starting
-        startForeground(NOTIFICATION_ID, createNotification("Starting..."))
+        acquireWakeLock()
 
         serviceScope.launch(Dispatchers.IO) {
             try {
@@ -126,6 +156,7 @@ class TransportService : Service() {
                 Log.e(TAG, "Failed to start transport", e)
                 _serviceState.value = ServiceState.Error(e.message ?: "Unknown error")
                 updateNotification("Error: ${e.message}")
+                releaseWakeLock()
             }
         }
     }
@@ -151,6 +182,7 @@ class TransportService : Service() {
             _discoveryEnabled.value = false
             _transportIdentity.value = null
             _serviceState.value = ServiceState.Stopped
+            releaseWakeLock()
             stopForeground(STOP_FOREGROUND_REMOVE)
         }
     }
@@ -193,6 +225,24 @@ class TransportService : Service() {
                 }
             }
         }
+    }
+
+    private fun acquireWakeLock() {
+        if (wakeLock == null) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "ReticulumTransport::TransportWakeLock",
+            )
+        }
+        wakeLock?.acquire()
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let {
+            if (it.isHeld) it.release()
+        }
+        wakeLock = null
     }
 
     private fun createNotificationChannel() {

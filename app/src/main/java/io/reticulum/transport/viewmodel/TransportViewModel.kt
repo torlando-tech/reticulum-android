@@ -20,7 +20,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.json.JSONArray
@@ -104,7 +103,7 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
 
         viewModelScope.launch {
             prefs.interfacesJson.collect { json ->
-                _interfaces.value = parseInterfaces(json)
+                _interfaces.value = InterfaceConfig.fromJson(json)
             }
         }
     }
@@ -117,21 +116,12 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun startService() {
-        viewModelScope.launch {
-            val ctx = getApplication<Application>()
-            val intent = Intent(ctx, TransportService::class.java)
-            ctx.startForegroundService(intent)
-            ctx.bindService(intent, connection, Context.BIND_AUTO_CREATE)
-
-            // Give the bind a moment to complete
-            kotlinx.coroutines.delay(200)
-
-            service?.startTransport(
-                transportEnabled = prefs.transportEnabled.first(),
-                shareInstance = prefs.shareInstance.first(),
-                interfaces = _interfaces.value,
-            )
+        val ctx = getApplication<Application>()
+        val intent = Intent(ctx, TransportService::class.java).apply {
+            action = TransportService.ACTION_START
         }
+        ctx.startForegroundService(intent)
+        ctx.bindService(intent, connection, Context.BIND_AUTO_CREATE)
     }
 
     fun stopService() {
@@ -240,66 +230,4 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
         return arr.toString()
     }
 
-    private fun parseInterfaces(json: String): List<InterfaceConfig> {
-        if (json.isBlank() || json == "[]") return emptyList()
-        return try {
-            val arr = JSONArray(json)
-            (0 until arr.length()).mapNotNull { i ->
-                val obj = arr.getJSONObject(i)
-                val name = obj.optString("name", "")
-                val enabled = obj.optBoolean("enabled", true)
-                val networkName = obj.optString("network_name", "")
-                val passphrase = obj.optString("passphrase", "")
-                val ifacSize = obj.optInt("ifac_size", 0)
-                val interfaceMode = obj.optString("interface_mode", "full")
-                when (obj.getString("type")) {
-                    "tcp_client" -> InterfaceConfig.TcpClient(
-                        name = name.ifEmpty { "TCP Client" },
-                        enabled = enabled,
-                        networkName = networkName, passphrase = passphrase,
-                        ifacSize = ifacSize, interfaceMode = interfaceMode,
-                        targetHost = obj.optString("target_host", ""),
-                        targetPort = obj.optInt("target_port", 4242),
-                    )
-                    "tcp_server" -> InterfaceConfig.TcpServer(
-                        name = name.ifEmpty { "TCP Server" },
-                        enabled = enabled,
-                        networkName = networkName, passphrase = passphrase,
-                        ifacSize = ifacSize, interfaceMode = interfaceMode,
-                        listenIp = obj.optString("listen_ip", "0.0.0.0"),
-                        listenPort = obj.optInt("listen_port", 4242),
-                    )
-                    "auto" -> InterfaceConfig.AutoInterface(
-                        name = name.ifEmpty { "Auto Interface" },
-                        enabled = enabled,
-                        networkName = networkName, passphrase = passphrase,
-                        ifacSize = ifacSize, interfaceMode = interfaceMode,
-                        groupId = obj.optString("group_id", ""),
-                        discoveryScope = obj.optString("discovery_scope", "link"),
-                    )
-                    "udp" -> InterfaceConfig.UdpInterface(
-                        name = name.ifEmpty { "UDP Interface" },
-                        enabled = enabled,
-                        networkName = networkName, passphrase = passphrase,
-                        ifacSize = ifacSize, interfaceMode = interfaceMode,
-                        listenIp = obj.optString("listen_ip", "0.0.0.0"),
-                        listenPort = obj.optInt("listen_port", 0),
-                        forwardIp = obj.optString("forward_ip", ""),
-                        forwardPort = obj.optInt("forward_port", 0),
-                    )
-                    "i2p" -> InterfaceConfig.I2PInterface(
-                        name = name.ifEmpty { "I2P Interface" },
-                        enabled = enabled,
-                        networkName = networkName, passphrase = passphrase,
-                        ifacSize = ifacSize, interfaceMode = interfaceMode,
-                        peers = obj.optString("peers", ""),
-                        connectable = obj.optBoolean("connectable", false),
-                    )
-                    else -> null
-                }
-            }
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
 }
