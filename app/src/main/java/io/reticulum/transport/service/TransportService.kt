@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.IBinder
 import android.os.PowerManager
@@ -93,7 +94,11 @@ class TransportService : Service() {
             }
             else -> {
                 // Must call startForeground() promptly after startForegroundService()
-                startForeground(NOTIFICATION_ID, createNotification("Starting..."))
+                startForeground(
+                    NOTIFICATION_ID,
+                    createNotification("Starting..."),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                )
 
                 // Start transport if not already running (handles both fresh start and system restart)
                 if (_serviceState.value !is ServiceState.Running &&
