@@ -1,12 +1,11 @@
 [versions]
-kotlin = "2.0.21"
-compose = "1.7.5"
-composeBom = "2024.12.01"
-coroutines = "1.9.0"
-lifecycle = "2.8.7"
-navigation = "2.8.4"
-chaquopy = "16.0.0"
-dataStore = "1.1.1"
+kotlin = "2.2.10"
+composeBom = "2026.02.01"
+coroutines = "1.10.2"
+lifecycle = "2.10.0"
+navigation = "2.9.7"
+chaquopy = "17.0.0"
+dataStore = "1.2.0"
 
 [libraries]
 # Compose
@@ -15,7 +14,7 @@ compose-ui = { module = "androidx.compose.ui:ui" }
 compose-material3 = { module = "androidx.compose.material3:material3" }
 compose-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 compose-tooling = { module = "androidx.compose.ui:ui-tooling" }
-compose-activity = { module = "androidx.activity:activity-compose", version = "1.9.3" }
+compose-activity = { module = "androidx.activity:activity-compose", version = "1.12.4" }
 
 # Navigation
 navigation = { module = "androidx.navigation:navigation-compose", version.ref = "navigation" }
@@ -31,8 +30,8 @@ lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-com
 lifecycle-service = { module = "androidx.lifecycle:lifecycle-service", version.ref = "lifecycle" }
 
 # Core
-core-ktx = { module = "androidx.core:core-ktx", version = "1.15.0" }
-splashscreen = { module = "androidx.core:core-splashscreen", version = "1.0.1" }
+core-ktx = { module = "androidx.core:core-ktx", version = "1.17.0" }
+splashscreen = { module = "androidx.core:core-splashscreen", version = "1.2.0" }
 
 # DataStore
 datastore = { module = "androidx.datastore:datastore-preferences", version.ref = "dataStore" }

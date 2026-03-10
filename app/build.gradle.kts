@@ -1,13 +1,12 @@
 plugins {
     id("com.android.application")
-    kotlin("android")
-    kotlin("plugin.compose")
+    id("org.jetbrains.kotlin.plugin.compose")
     id("com.chaquo.python")
 }
 
 android {
     namespace = "io.reticulum.transport"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "io.reticulum.transport"
@@ -41,8 +40,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
     }
 
     buildFeatures {

@@ -5,6 +5,12 @@
     android:viewportWidth="750"
     android:viewportHeight="750">
     <group
+        android:scaleX="0.85"
+        android:scaleY="0.85"
+        android:pivotX="375"
+        android:pivotY="375"
+        android:translateX="15">
+    <group
         android:translateY="125">
         <!-- Reticulum constellation network pattern -->
         <path
@@ -22,5 +28,6 @@
         <path
             android:fillColor="#FFFFFF"
             android:pathData="M626.02,225.40 C620.18,225.47 615.10,227.93 611.03,231.99 Q594.14,248.82 577.88,265.18 C570.84,272.27 562.83,275.27 552.74,275.04 Q546.91,274.91 541.55,275.02 Q541.24,275.03 541.24,274.72 L541.26,265.31 Q541.26,265.09 541.48,265.09 Q548.47,265.10 555.13,265.08 Q564.00,265.06 570.46,258.64 Q586.89,242.31 603.63,225.41 C610.60,218.38 618.61,215.16 628.73,215.43 Q634.15,215.58 639.89,215.44 Q640.46,215.43 640.47,216.00 L640.48,224.95 Q640.48,225.36 640.07,225.36 Q633.01,225.32 626.02,225.40 Z" />
+    </group>
     </group>
 </vector>

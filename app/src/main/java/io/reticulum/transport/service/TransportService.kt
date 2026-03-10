@@ -92,19 +92,35 @@ class TransportService : Service() {
                 stopTransport()
                 stopSelf()
             }
-            else -> {
-                // Must call startForeground() promptly after startForegroundService()
+            ACTION_START -> {
+                // Explicit start from UI — safe to start foreground
                 startForeground(
                     NOTIFICATION_ID,
                     createNotification("Starting..."),
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
                 )
-
-                // Start transport if not already running (handles both fresh start and system restart)
                 if (_serviceState.value !is ServiceState.Running &&
                     _serviceState.value !is ServiceState.Starting
                 ) {
                     startTransportFromPrefs()
+                }
+            }
+            else -> {
+                // Null intent = system restart via START_STICKY
+                try {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        createNotification("Starting..."),
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                    )
+                    if (_serviceState.value !is ServiceState.Running &&
+                        _serviceState.value !is ServiceState.Starting
+                    ) {
+                        startTransportFromPrefs()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Cannot restart foreground service from background, stopping", e)
+                    stopSelf()
                 }
             }
         }
