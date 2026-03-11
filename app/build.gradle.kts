@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "io.reticulum.transport"
+    namespace = "tech.torlando.rns"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "io.reticulum.transport"
+        applicationId = "tech.torlando.rns"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

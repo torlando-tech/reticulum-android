@@ -5,4 +5,4 @@
 }
 
 # Keep bridge classes called from Python
--keep class io.reticulum.transport.bridges.** { *; }
+-keep class tech.torlando.rns.bridges.** { *; }

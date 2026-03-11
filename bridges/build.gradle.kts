@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace = "io.reticulum.transport.bridges"
+    namespace = "tech.torlando.rns.bridges"
     compileSdk = 36
 
     defaultConfig {
