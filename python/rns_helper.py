@@ -24,6 +24,9 @@ import sys
 import socket
 import time
 
+# Active RNode interfaces created via create_rnode_interface()
+_rnode_interfaces = []
+
 
 def _get_classes():
     """Get the actual Reticulum and Transport classes via every known path."""
@@ -114,6 +117,48 @@ def _reset_all():
         except Exception: pass
 
 
+def set_rnode_bridge(bridge):
+    """Set the KotlinRNodeBridge instance for Python RNode interfaces."""
+    import rnode_interface
+    rnode_interface.set_rnode_bridge(bridge)
+
+
+def set_usb_bridge(bridge):
+    """Set the KotlinUSBBridge instance for Python USB interfaces."""
+    import usb_bridge
+    usb_bridge.set_usb_bridge(bridge)
+
+
+def create_rnode_interface(name, connection_mode, target_device, frequency, bandwidth, spreading_factor, coding_rate, tx_power):
+    """Create an RNode interface and register it with RNS Transport."""
+    import rnode_interface as rni
+
+    iface = rni.RNodeInterface(
+        name=name,
+        connection_mode=connection_mode,
+        target_device_name=target_device,
+        frequency=int(frequency),
+        bandwidth=int(bandwidth),
+        spreading_factor=int(spreading_factor),
+        coding_rate=int(coding_rate),
+        tx_power=int(tx_power),
+    )
+    _rnode_interfaces.append(iface)
+    RNS.log(f"Created RNode interface: {name}", RNS.LOG_INFO)
+    return iface
+
+
+def destroy_rnode_interfaces():
+    """Tear down all RNode interfaces."""
+    global _rnode_interfaces
+    for iface in _rnode_interfaces:
+        try:
+            iface.detach()
+        except Exception:
+            pass
+    _rnode_interfaces = []
+
+
 def enable_discovery():
     """Enable interface discovery listener."""
     try:
@@ -169,6 +214,9 @@ def start(config_path, retries=3, delay=2.0):
 
 def stop():
     """Shut down RNS and fully reset all singleton state for restart."""
+    # 0. Destroy RNode interfaces first
+    destroy_rnode_interfaces()
+
     # 1. Run the official exit handler
     try:
         ret_classes, _ = _get_classes()

@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.CellTower
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
@@ -29,6 +30,8 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Sensors
+import androidx.compose.material.icons.filled.SettingsInputAntenna
+import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -67,6 +70,7 @@ private val StatusOffline = Color(0xFF9E9E9E)
 fun InterfacesScreen(
     viewModel: TransportViewModel,
     onNavigateToDiscovery: () -> Unit = {},
+    onNavigateToRnodeWizard: () -> Unit = {},
 ) {
     val interfaces by viewModel.interfaces.collectAsState()
     val liveStats by viewModel.interfaceStats.collectAsState()
@@ -269,6 +273,7 @@ fun InterfacesScreen(
                     "auto" -> showAutoDialog = true
                     "udp" -> showUdpDialog = true
                     "i2p" -> showI2pDialog = true
+                    "rnode" -> onNavigateToRnodeWizard()
                 }
             },
         )
@@ -324,6 +329,7 @@ fun InterfacesScreen(
         )
     }
 
+
     // Delete confirmation
     pendingDeleteIndex?.let { index ->
         val config = interfaces.getOrNull(index)
@@ -366,6 +372,7 @@ private fun ConfiguredInterfaceCard(
         is InterfaceConfig.AutoInterface -> Icons.Filled.Sensors
         is InterfaceConfig.UdpInterface -> Icons.Filled.Wifi
         is InterfaceConfig.I2PInterface -> Icons.Filled.Security
+        is InterfaceConfig.RNodeInterface -> Icons.Filled.SettingsInputAntenna
     }
     val target = when (config) {
         is InterfaceConfig.TcpClient -> "${config.targetHost}:${config.targetPort}"
@@ -373,6 +380,7 @@ private fun ConfiguredInterfaceCard(
         is InterfaceConfig.AutoInterface -> if (config.groupId.isNotBlank()) "Group: ${config.groupId}" else "Auto Discovery"
         is InterfaceConfig.UdpInterface -> "${config.listenIp}:${config.listenPort} -> ${config.forwardIp}:${config.forwardPort}"
         is InterfaceConfig.I2PInterface -> if (config.connectable) "Connectable" else "Client Only"
+        is InterfaceConfig.RNodeInterface -> "${config.connectionMode} ${config.targetDevice}".trim().ifEmpty { "RNode" }
     }
 
     // Determine status from live data when running, otherwise from config
@@ -696,6 +704,7 @@ private val interfaceTypes = listOf(
     InterfaceTypeOption("auto", "Auto Interface", "Discover peers on the local network", Icons.Filled.Sensors),
     InterfaceTypeOption("udp", "UDP Interface", "Broadcast or multicast UDP communication", Icons.Filled.Wifi),
     InterfaceTypeOption("i2p", "I2P Interface", "Anonymous communication via the I2P network", Icons.Filled.Security),
+    InterfaceTypeOption("rnode", "RNode", "LoRa radio via Bluetooth or USB", Icons.Filled.SettingsInputAntenna),
 )
 
 @Composable
@@ -1043,6 +1052,7 @@ private fun I2pAddDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
+
 
 // -- Common IFAC / mode fields for all interface dialogs --
 

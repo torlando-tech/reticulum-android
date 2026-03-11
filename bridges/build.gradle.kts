@@ -28,4 +28,6 @@ dependencies {
     implementation(libs.core.ktx)
     implementation(libs.coroutines.core)
     implementation(libs.coroutines.android)
+    api("com.github.mik3y:usb-serial-for-android:3.7.0")
+    compileOnly("com.chaquo.python.runtime:chaquopy_java:17.0.0")
 }

@@ -174,7 +174,7 @@ class TransportService : Service() {
         serviceScope.launch(Dispatchers.IO) {
             try {
                 val storagePath = filesDir.absolutePath
-                val b = ReticulumBinding(storagePath)
+                val b = ReticulumBinding(storagePath, this@TransportService)
                 b.initialize(
                     transportEnabled = transportEnabled,
                     shareInstance = shareInstance,

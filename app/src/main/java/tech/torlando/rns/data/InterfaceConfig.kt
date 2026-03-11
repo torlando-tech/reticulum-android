@@ -66,6 +66,19 @@ sealed class InterfaceConfig {
                             peers = obj.optString("peers", ""),
                             connectable = obj.optBoolean("connectable", false),
                         )
+                        "rnode" -> RNodeInterface(
+                            name = name.ifEmpty { "RNode Interface" },
+                            enabled = enabled,
+                            networkName = networkName, passphrase = passphrase,
+                            ifacSize = ifacSize, interfaceMode = interfaceMode,
+                            connectionMode = obj.optString("connection_mode", "classic"),
+                            targetDevice = obj.optString("target_device", ""),
+                            frequency = obj.optLong("frequency", 0),
+                            bandwidth = obj.optInt("bandwidth", 0),
+                            spreadingFactor = obj.optInt("spreading_factor", 0),
+                            codingRate = obj.optInt("coding_rate", 0),
+                            txPower = obj.optInt("tx_power", 0),
+                        )
                         else -> null
                     }
                 }
@@ -130,5 +143,21 @@ sealed class InterfaceConfig {
         override val interfaceMode: String = "full",
         val peers: String = "",
         val connectable: Boolean = false,
+    ) : InterfaceConfig()
+
+    data class RNodeInterface(
+        override val name: String = "RNode Interface",
+        override val enabled: Boolean = true,
+        override val networkName: String = "",
+        override val passphrase: String = "",
+        override val ifacSize: Int = 0,
+        override val interfaceMode: String = "full",
+        val connectionMode: String = "classic",
+        val targetDevice: String = "",
+        val frequency: Long = 0,
+        val bandwidth: Int = 0,
+        val spreadingFactor: Int = 0,
+        val codingRate: Int = 0,
+        val txPower: Int = 0,
     ) : InterfaceConfig()
 }

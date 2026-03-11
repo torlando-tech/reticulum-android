@@ -256,6 +256,16 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
                     obj.put("peers", iface.peers)
                     obj.put("connectable", iface.connectable)
                 }
+                is InterfaceConfig.RNodeInterface -> {
+                    obj.put("type", "rnode")
+                    obj.put("connection_mode", iface.connectionMode)
+                    obj.put("target_device", iface.targetDevice)
+                    obj.put("frequency", iface.frequency)
+                    obj.put("bandwidth", iface.bandwidth)
+                    obj.put("spreading_factor", iface.spreadingFactor)
+                    obj.put("coding_rate", iface.codingRate)
+                    obj.put("tx_power", iface.txPower)
+                }
             }
             arr.put(obj)
         }

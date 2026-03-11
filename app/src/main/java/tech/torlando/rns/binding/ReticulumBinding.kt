@@ -1,14 +1,17 @@
 package tech.torlando.rns.binding
 
+import android.content.Context
 import android.util.Log
 import com.chaquo.python.PyObject
 import com.chaquo.python.Python
+import tech.torlando.rns.bridges.rnode.KotlinRNodeBridge
+import tech.torlando.rns.bridges.usb.KotlinUSBBridge
 import tech.torlando.rns.data.DiscoveredInterface
 import tech.torlando.rns.data.InterfaceConfig
 import tech.torlando.rns.data.InterfaceStats
 import java.io.File
 
-class ReticulumBinding(private val storagePath: String) {
+class ReticulumBinding(private val storagePath: String, private val context: Context) {
 
     companion object {
         private const val TAG = "ReticulumBinding"
@@ -16,6 +19,8 @@ class ReticulumBinding(private val storagePath: String) {
 
     private val py: Python = Python.getInstance()
     private var reticulum: PyObject? = null
+    private var rnodeBridge: KotlinRNodeBridge? = null
+    private var usbBridge: KotlinUSBBridge? = null
 
     val isRunning: Boolean
         get() = reticulum != null
@@ -51,6 +56,53 @@ class ReticulumBinding(private val storagePath: String) {
         val helper = py.getModule("rns_helper")
         reticulum = helper.callAttr("start", configDir.absolutePath)
         Log.i(TAG, "RNS initialized successfully")
+
+        // Set up RNode bridges and create interfaces for any RNode configs
+        val rnodeConfigs = interfaces.filterIsInstance<InterfaceConfig.RNodeInterface>()
+            .filter { it.enabled }
+        if (rnodeConfigs.isNotEmpty()) {
+            setupRNodeBridges(helper, rnodeConfigs)
+        }
+    }
+
+    private fun setupRNodeBridges(
+        helper: PyObject,
+        rnodeConfigs: List<InterfaceConfig.RNodeInterface>,
+    ) {
+        try {
+            // Create and set Kotlin bridges
+            val bridge = KotlinRNodeBridge(context)
+            rnodeBridge = bridge
+            helper.callAttr("set_rnode_bridge", bridge)
+            Log.i(TAG, "RNode bridge set")
+
+            val usb = KotlinUSBBridge(context)
+            usbBridge = usb
+            helper.callAttr("set_usb_bridge", usb)
+            Log.i(TAG, "USB bridge set")
+
+            // Create an RNode interface for each config
+            for (config in rnodeConfigs) {
+                try {
+                    helper.callAttr(
+                        "create_rnode_interface",
+                        config.name,
+                        config.connectionMode,
+                        config.targetDevice,
+                        config.frequency,
+                        config.bandwidth,
+                        config.spreadingFactor,
+                        config.codingRate,
+                        config.txPower,
+                    )
+                    Log.i(TAG, "Created RNode interface: ${config.name}")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to create RNode interface: ${config.name}", e)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting up RNode bridges", e)
+        }
     }
 
     fun shutdown() {
@@ -61,6 +113,14 @@ class ReticulumBinding(private val storagePath: String) {
         } catch (e: Exception) {
             Log.e(TAG, "Error during RNS shutdown", e)
         } finally {
+            try {
+                rnodeBridge?.shutdown()
+            } catch (_: Exception) {}
+            try {
+                usbBridge?.shutdown()
+            } catch (_: Exception) {}
+            rnodeBridge = null
+            usbBridge = null
             reticulum = null
         }
     }

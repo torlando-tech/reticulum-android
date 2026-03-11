@@ -1,0 +1,8 @@
+tech.torlando.rns.rnode.rnode-wizard-pngs-0 /home/tyler/repos/public/reticulum-android/rnode-wizard/build/generated/res/pngs/debug
+tech.torlando.rns.rnode.rnode-wizard-updated_navigation_xml-1 /home/tyler/repos/public/reticulum-android/rnode-wizard/build/generated/updated_navigation_xml/debug
+tech.torlando.rns.rnode.rnode-wizard-mergeDebugResources-2 /home/tyler/repos/public/reticulum-android/rnode-wizard/build/intermediates/incremental/debug/mergeDebugResources/merged.dir
+tech.torlando.rns.rnode.rnode-wizard-mergeDebugResources-3 /home/tyler/repos/public/reticulum-android/rnode-wizard/build/intermediates/incremental/debug/mergeDebugResources/stripped.dir
+tech.torlando.rns.rnode.rnode-wizard-debug-4 /home/tyler/repos/public/reticulum-android/rnode-wizard/build/intermediates/merged_res/debug/mergeDebugResources
+tech.torlando.rns.rnode.rnode-wizard-debug-5 /home/tyler/repos/public/reticulum-android/rnode-wizard/build/intermediates/packaged_res/debug/packageDebugResources
+tech.torlando.rns.rnode.rnode-wizard-debug-6 /home/tyler/repos/public/reticulum-android/rnode-wizard/src/debug/res
+tech.torlando.rns.rnode.rnode-wizard-main-7 /home/tyler/repos/public/reticulum-android/rnode-wizard/src/main/res

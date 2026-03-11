@@ -79,6 +79,7 @@ chaquopy {
 
 dependencies {
     implementation(project(":bridges"))
+    implementation(project(":rnode-wizard"))
 
     // Core
     implementation(libs.core.ktx)

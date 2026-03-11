@@ -95,6 +95,7 @@ object ConfigGenerator {
                         }
                     }
                 }
+                is InterfaceConfig.RNodeInterface -> continue
             }
 
             // Common IFAC and mode fields

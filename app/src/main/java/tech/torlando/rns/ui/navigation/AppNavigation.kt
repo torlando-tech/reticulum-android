@@ -22,6 +22,10 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import tech.torlando.rns.data.InterfaceConfig
+import tech.torlando.rns.rnode.data.RNodeWizardResult
+import tech.torlando.rns.rnode.ui.RNodeWizardScreen
+import tech.torlando.rns.rnode.viewmodel.RNodeWizardViewModel
 import tech.torlando.rns.ui.screens.DiscoveredInterfacesScreen
 import tech.torlando.rns.ui.screens.HomeScreen
 import tech.torlando.rns.ui.screens.InterfacesScreen
@@ -75,6 +79,7 @@ fun AppNavigation(viewModel: TransportViewModel = viewModel()) {
                 InterfacesScreen(
                     viewModel = viewModel,
                     onNavigateToDiscovery = { navController.navigate("discovered_interfaces") },
+                    onNavigateToRnodeWizard = { navController.navigate("rnode_wizard") },
                 )
             }
             composable(Screen.Monitor.route) { MonitorScreen(viewModel) }
@@ -85,6 +90,33 @@ fun AppNavigation(viewModel: TransportViewModel = viewModel()) {
                     onNavigateBack = { navController.popBackStack() },
                 )
             }
+            composable("rnode_wizard") {
+                val wizardViewModel: RNodeWizardViewModel = viewModel()
+                RNodeWizardScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onComplete = {
+                        wizardViewModel.state.value.savedResult?.let { result ->
+                            viewModel.addInterface(result.toInterfaceConfig())
+                        }
+                        navController.popBackStack()
+                    },
+                    viewModel = wizardViewModel,
+                )
+            }
         }
     }
 }
+
+private fun RNodeWizardResult.toInterfaceConfig() =
+    InterfaceConfig.RNodeInterface(
+        name = name,
+        enabled = true,
+        interfaceMode = interfaceMode,
+        connectionMode = connectionMode,
+        targetDevice = targetDevice,
+        frequency = frequency,
+        bandwidth = bandwidth,
+        spreadingFactor = spreadingFactor,
+        codingRate = codingRate,
+        txPower = txPower,
+    )
