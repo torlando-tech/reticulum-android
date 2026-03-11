@@ -22,8 +22,12 @@ class ReticulumBinding(private val storagePath: String) {
 
     fun initialize(
         transportEnabled: Boolean,
-        shareInstance: Boolean,
+        shareInstance: Boolean = true,
+        sharedInstancePort: Int = 0,
+        instanceControlPort: Int = 0,
         interfaces: List<InterfaceConfig>,
+        publishBlackhole: Boolean = false,
+        blackholeSources: String = "",
     ) {
         val configDir = File(storagePath, "reticulum")
         configDir.mkdirs()
@@ -34,6 +38,10 @@ class ReticulumBinding(private val storagePath: String) {
                 interfaces = interfaces,
                 transportEnabled = transportEnabled,
                 shareInstance = shareInstance,
+                sharedInstancePort = sharedInstancePort,
+                instanceControlPort = instanceControlPort,
+                publishBlackhole = publishBlackhole,
+                blackholeSources = blackholeSources,
             ),
         )
 

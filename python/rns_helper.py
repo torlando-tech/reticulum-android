@@ -6,9 +6,18 @@ Handles two issues that prevent clean restart:
 2. RNS uses class-level singletons/state that aren't cleared by exit_handler()
 """
 
+import os
 import signal
 # Patch signal before RNS imports it
 signal.signal = lambda *a, **kw: None
+
+# Patch os._exit to raise SystemExit instead of hard-killing the process.
+# RNS calls os._exit() on unhandled exceptions, which bypasses all try/except
+# and kills the entire Android app. Converting to SystemExit lets us catch it.
+_real_os_exit = os._exit
+def _safe_exit(code=0):
+    raise SystemExit(code)
+os._exit = _safe_exit
 
 import RNS
 import sys
@@ -127,19 +136,35 @@ def list_discovered():
 
 def start(config_path, retries=3, delay=2.0):
     """Initialize RNS. Retries on EADDRINUSE after stop()."""
+    last_error = None
     for attempt in range(retries):
         _reset_all()
         try:
             return RNS.Reticulum(config_path)
-        except Exception as e:
-            is_addr_in_use = isinstance(e, OSError) and getattr(e, 'errno', None) == 98
+        except BaseException as e:
+            last_error = e
+            # Unwrap SystemExit to get at the original error context
+            if isinstance(e, SystemExit):
+                last_error = OSError(
+                    "RNS exited during initialization (likely a port conflict or config error)"
+                )
+            is_addr_in_use = (
+                (isinstance(e, OSError) and getattr(e, 'errno', None) == 98) or
+                (isinstance(e, SystemExit)) or
+                ("Address already in use" in str(e))
+            )
             if not is_addr_in_use and attempt >= retries - 1:
-                raise
+                raise last_error from e if last_error is not e else e
             if attempt < retries - 1:
                 if is_addr_in_use:
                     time.sleep(delay)
                 continue
-            raise
+            if is_addr_in_use:
+                raise OSError(
+                    "EADDRINUSE: Port already in use after %d attempts. "
+                    "Another Reticulum instance may be running." % retries
+                ) from e
+            raise last_error from e if last_error is not e else e
 
 
 def stop():

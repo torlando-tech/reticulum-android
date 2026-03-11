@@ -7,13 +7,26 @@ object ConfigGenerator {
     fun generate(
         interfaces: List<InterfaceConfig>,
         transportEnabled: Boolean,
-        shareInstance: Boolean,
+        shareInstance: Boolean = true,
+        sharedInstancePort: Int = 0,
+        instanceControlPort: Int = 0,
+        publishBlackhole: Boolean = false,
+        blackholeSources: String = "",
     ): String = buildString {
         appendLine("[reticulum]")
         appendLine("  enable_transport = $transportEnabled")
-        appendLine("  share_instance = $shareInstance")
+        appendLine("  share_instance = ${if (shareInstance) "Yes" else "No"}")
         if (shareInstance) {
-            appendLine("  shared_instance_type = tcp")
+            if (sharedInstancePort > 0) {
+                appendLine("  shared_instance_port = $sharedInstancePort")
+            }
+            if (instanceControlPort > 0) {
+                appendLine("  instance_control_port = $instanceControlPort")
+            }
+        }
+        appendLine("  publish_blackhole = ${if (publishBlackhole) "Yes" else "No"}")
+        if (blackholeSources.isNotBlank()) {
+            appendLine("  blackhole_sources = $blackholeSources")
         }
         appendLine()
         appendLine("[logging]")

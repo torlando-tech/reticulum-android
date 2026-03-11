@@ -62,6 +62,22 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope, SharingStarted.Eagerly, true,
     )
 
+    val sharedInstancePort = prefs.sharedInstancePort.stateIn(
+        viewModelScope, SharingStarted.Eagerly, 0,
+    )
+
+    val instanceControlPort = prefs.instanceControlPort.stateIn(
+        viewModelScope, SharingStarted.Eagerly, 0,
+    )
+
+    val publishBlackhole = prefs.publishBlackhole.stateIn(
+        viewModelScope, SharingStarted.Eagerly, false,
+    )
+
+    val blackholeSources = prefs.blackholeSources.stateIn(
+        viewModelScope, SharingStarted.Eagerly, "",
+    )
+
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             val svc = (binder as TransportService.LocalBinder).service
@@ -176,6 +192,22 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun setShareInstance(enabled: Boolean) {
         viewModelScope.launch { prefs.setShareInstance(enabled) }
+    }
+
+    fun setSharedInstancePort(port: Int) {
+        viewModelScope.launch { prefs.setSharedInstancePort(port) }
+    }
+
+    fun setInstanceControlPort(port: Int) {
+        viewModelScope.launch { prefs.setInstanceControlPort(port) }
+    }
+
+    fun setPublishBlackhole(enabled: Boolean) {
+        viewModelScope.launch { prefs.setPublishBlackhole(enabled) }
+    }
+
+    fun setBlackholeSources(sources: String) {
+        viewModelScope.launch { prefs.setBlackholeSources(sources) }
     }
 
     fun enableDiscovery() {

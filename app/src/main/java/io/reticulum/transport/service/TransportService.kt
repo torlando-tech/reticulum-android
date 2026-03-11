@@ -137,16 +137,32 @@ class TransportService : Service() {
         serviceScope.launch {
             val transportEnabled = prefs.transportEnabled.first()
             val shareInstance = prefs.shareInstance.first()
+            val sharedInstancePort = prefs.sharedInstancePort.first()
+            val instanceControlPort = prefs.instanceControlPort.first()
             val interfacesJson = prefs.interfacesJson.first()
             val interfaces = InterfaceConfig.fromJson(interfacesJson)
-            startTransport(transportEnabled, shareInstance, interfaces)
+            val publishBlackhole = prefs.publishBlackhole.first()
+            val blackholeSources = prefs.blackholeSources.first()
+            startTransport(
+                transportEnabled = transportEnabled,
+                shareInstance = shareInstance,
+                sharedInstancePort = sharedInstancePort,
+                instanceControlPort = instanceControlPort,
+                interfaces = interfaces,
+                publishBlackhole = publishBlackhole,
+                blackholeSources = blackholeSources,
+            )
         }
     }
 
     fun startTransport(
         transportEnabled: Boolean,
-        shareInstance: Boolean,
+        shareInstance: Boolean = true,
+        sharedInstancePort: Int = 0,
+        instanceControlPort: Int = 0,
         interfaces: List<InterfaceConfig>,
+        publishBlackhole: Boolean = false,
+        blackholeSources: String = "",
     ) {
         if (_serviceState.value is ServiceState.Running || _serviceState.value is ServiceState.Starting ||
             _serviceState.value is ServiceState.Stopping
@@ -162,7 +178,11 @@ class TransportService : Service() {
                 b.initialize(
                     transportEnabled = transportEnabled,
                     shareInstance = shareInstance,
+                    sharedInstancePort = sharedInstancePort,
+                    instanceControlPort = instanceControlPort,
                     interfaces = interfaces,
+                    publishBlackhole = publishBlackhole,
+                    blackholeSources = blackholeSources,
                 )
                 binding = b
 
@@ -175,8 +195,9 @@ class TransportService : Service() {
                 Log.i(TAG, "Transport started successfully")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start transport", e)
-                _serviceState.value = ServiceState.Error(e.message ?: "Unknown error")
-                updateNotification("Error: ${e.message}")
+                val message = friendlyErrorMessage(e)
+                _serviceState.value = ServiceState.Error(message)
+                updateNotification("Error: $message")
                 releaseWakeLock()
             }
         }
@@ -302,6 +323,23 @@ class TransportService : Service() {
             .addAction(R.drawable.ic_notification, "Stop", stopIntent)
             .setOngoing(true)
             .build()
+    }
+
+    private fun friendlyErrorMessage(e: Exception): String {
+        val msg = e.message ?: e.cause?.message ?: ""
+        return when {
+            msg.contains("EADDRINUSE", ignoreCase = true) ||
+                msg.contains("Address already in use", ignoreCase = true) ||
+                msg.contains("errno 98", ignoreCase = true) ->
+                "Port already in use. Another Reticulum instance or app may be using the same AutoInterface port. " +
+                    "Try stopping other Reticulum apps first."
+            msg.contains("Permission denied", ignoreCase = true) ||
+                msg.contains("EACCES", ignoreCase = true) ->
+                "Permission denied while setting up network interfaces."
+            msg.contains("Network is unreachable", ignoreCase = true) ->
+                "Network is unreachable. Check your connection and try again."
+            else -> msg.ifBlank { "Unknown error" }
+        }
     }
 
     private fun updateNotification(status: String) {
