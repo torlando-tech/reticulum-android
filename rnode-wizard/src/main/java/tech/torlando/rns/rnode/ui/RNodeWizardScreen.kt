@@ -102,7 +102,7 @@ fun RNodeWizardScreen(
                         viewModel.goToNextStep()
                     }
                 },
-                modifier = Modifier.navigationBarsPadding(),
+                modifier = Modifier,
             )
         },
     ) { paddingValues ->

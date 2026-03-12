@@ -133,18 +133,36 @@ def create_rnode_interface(name, connection_mode, target_device, frequency, band
     """Create an RNode interface and register it with RNS Transport."""
     import rnode_interface as rni
 
-    iface = rni.RNodeInterface(
-        name=name,
-        connection_mode=connection_mode,
-        target_device_name=target_device,
-        frequency=int(frequency),
-        bandwidth=int(bandwidth),
-        spreading_factor=int(spreading_factor),
-        coding_rate=int(coding_rate),
-        tx_power=int(tx_power),
-    )
+    # Get the Reticulum instance as the owner
+    ret_classes, _ = _get_classes()
+    owner = None
+    for cls in ret_classes:
+        owner = getattr(cls, "_Reticulum__instance", None)
+        if owner is not None:
+            break
+
+    config = {
+        "connection_mode": connection_mode,
+        "target_device_name": target_device,
+        "frequency": int(frequency),
+        "bandwidth": int(bandwidth),
+        "spreading_factor": int(spreading_factor),
+        "coding_rate": int(coding_rate),
+        "tx_power": int(tx_power),
+    }
+
+    iface = rni.RNodeInterface(owner, name, config)
     _rnode_interfaces.append(iface)
     RNS.log(f"Created RNode interface: {name}", RNS.LOG_INFO)
+
+    # Start the interface (connect to device and configure radio)
+    if iface.start():
+        # Register with RNS Transport so it can route packets
+        RNS.Transport.interfaces.append(iface)
+        RNS.log(f"RNode interface '{name}' started and registered with Transport", RNS.LOG_INFO)
+    else:
+        RNS.log(f"RNode interface '{name}' failed to start", RNS.LOG_ERROR)
+
     return iface
 
 

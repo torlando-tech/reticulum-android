@@ -156,9 +156,9 @@ class KISS:
         return bytes(result)
 
 
-class ColumbaRNodeInterface:
+class RNodeInterface:
     """
-    RNode interface for Columba using KotlinRNodeBridge.
+    RNode interface using KotlinRNodeBridge for Bluetooth communication.
 
     This interface handles KISS protocol communication with RNode hardware
     over Bluetooth Classic (SPP/RFCOMM) or Bluetooth Low Energy (BLE GATT).
@@ -308,7 +308,7 @@ class ColumbaRNodeInterface:
         # Validate configuration
         self._validate_config()
 
-        RNS.log(f"ColumbaRNodeInterface '{name}' initialized", RNS.LOG_DEBUG)
+        RNS.log(f"RNodeInterface '{name}' initialized", RNS.LOG_DEBUG)
 
     def _get_kotlin_bridge(self):
         """Get the Kotlin RNode bridge from module globals."""
@@ -1266,4 +1266,4 @@ class ColumbaRNodeInterface:
             return False
 
     def __str__(self):
-        return f"ColumbaRNodeInterface[{self.name}]"
+        return f"RNodeInterface[{self.name}]"
