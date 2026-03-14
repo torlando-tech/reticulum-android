@@ -43,9 +43,32 @@ jobs:
           echo "Building version: $VERSION from tag: $TAG_NAME"
 
       - name: Build Release APK
+        env:
+          KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           ./gradlew :app:assembleRelease --no-daemon --stacktrace
           echo "✓ Release APK built successfully"
+
+      - name: Extract signing certificate fingerprints
+        id: cert
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          CERT_INFO=$(keytool -list -v -keystore app/build/keystore/release.keystore \
+            -alias "$KEY_ALIAS" -storepass "$KEYSTORE_PASSWORD")
+          SHA256=$(echo "$CERT_INFO" | grep "SHA256:" | awk '{print $2}')
+          SHA1=$(echo "$CERT_INFO" | grep "SHA1:" | awk '{print $2}')
+          if [ -z "$SHA256" ] || [ -z "$SHA1" ]; then
+            echo "::error::Failed to extract certificate fingerprints"
+            exit 1
+          fi
+          echo "sha256=$SHA256" >> $GITHUB_OUTPUT
+          echo "sha1=$SHA1" >> $GITHUB_OUTPUT
+          echo "✓ Extracted certificate fingerprints"
 
       - name: Rename APK with version
         env:
@@ -98,7 +121,13 @@ jobs:
             |-----|-------------|
             | `reticulum-${{ steps.version.outputs.version }}.apk` | Universal APK (all architectures) |
 
-            > **Note:** This APK is unsigned (debug key). Signed releases coming soon.
+            ### Verification
+
+            **Signing Certificate Fingerprints:**
+            ```
+            SHA-256: ${{ steps.cert.outputs.sha256 }}
+            SHA-1:   ${{ steps.cert.outputs.sha1 }}
+            ```
 
             **SHA256 Checksums:**
             ```

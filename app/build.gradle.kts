@@ -1,3 +1,5 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -25,6 +27,50 @@ android {
         }
     }
 
+    val releaseSigningConfigured =
+        run {
+            val keystoreFile = System.getenv("KEYSTORE_FILE")
+            val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
+            val keyAlias = System.getenv("KEY_ALIAS")
+            val keyPassword = System.getenv("KEY_PASSWORD")
+
+            !keystoreFile.isNullOrEmpty() && !keystorePassword.isNullOrEmpty() &&
+                !keyAlias.isNullOrEmpty() && !keyPassword.isNullOrEmpty()
+        }
+
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                val keystoreFile = System.getenv("KEYSTORE_FILE")!!
+                val keystorePassword = System.getenv("KEYSTORE_PASSWORD")!!
+                val keyAlias = System.getenv("KEY_ALIAS")!!
+                val keyPassword = System.getenv("KEY_PASSWORD")!!
+
+                try {
+                    val keystoreDir = file("${layout.buildDirectory.get().asFile}/keystore")
+                    keystoreDir.mkdirs()
+                    val decodedKeystore = file("$keystoreDir/release.keystore")
+                    val cleanedKeystoreFile = keystoreFile.replace("\\s".toRegex(), "")
+                    decodedKeystore.writeBytes(Base64.getDecoder().decode(cleanedKeystoreFile))
+
+                    storeFile = decodedKeystore
+                    storePassword = keystorePassword
+                    this.keyAlias = keyAlias
+                    this.keyPassword = keyPassword
+
+                    println("✓ Release signing configured from environment variables")
+                } catch (e: IllegalArgumentException) {
+                    throw GradleException(
+                        "Failed to decode KEYSTORE_FILE: ${e.message}\n" +
+                            "To encode: base64 -w 0 your-keystore.jks",
+                    )
+                }
+            }
+        } else {
+            println("⚠ Release signing not configured (missing environment variables)")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -32,6 +78,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
