@@ -286,7 +286,7 @@ class RNodeInterface:
         self.r_stat_snr = None
 
         # External framebuffer (display) settings
-        self.enable_framebuffer = config.get("enable_framebuffer", False)
+        self.enable_framebuffer = config.get("enable_framebuffer", True)
         self.framebuffer_enabled = False
 
         # Read thread
@@ -458,7 +458,11 @@ class RNodeInterface:
 
         # Start read thread
         self._running.set()
-        self._read_thread = threading.Thread(target=self._read_loop_usb, daemon=True)
+        self._read_thread = threading.Thread(
+            target=self._read_loop,
+            kwargs={"bridge": self.usb_bridge, "label": "RNode USB"},
+            daemon=True,
+        )
         self._read_thread.start()
 
         # Configure device
@@ -767,170 +771,48 @@ class RNodeInterface:
         RNS.log(f"{self} Sent 64x64 image to RNode framebuffer", RNS.LOG_DEBUG)
 
     def _display_logo(self):
-        """Display or disable the Columba logo on RNode based on settings."""
+        """Display or disable the Reticulum logo on RNode based on settings."""
         if self.enable_framebuffer:
             try:
-                from columba_logo import columba_fb_data
-                self.display_image(columba_fb_data)
-                # Delay before enable command to ensure framebuffer data is processed
+                from rns_logo import rns_fb_data
+                RNS.log(f"{self} Sending Reticulum logo to RNode framebuffer...", RNS.LOG_INFO)
+                self.display_image(rns_fb_data)
                 time.sleep(0.05)
                 self.enable_external_framebuffer()
-                RNS.log(f"{self} Displayed Columba logo on RNode", RNS.LOG_DEBUG)
+                RNS.log(f"{self} Reticulum logo displayed on RNode", RNS.LOG_INFO)
             except ImportError:
-                RNS.log(f"{self} columba_logo module not found, skipping logo display", RNS.LOG_WARNING)
+                RNS.log(f"{self} rns_logo module not found, skipping logo display", RNS.LOG_WARNING)
             except Exception as e:
                 RNS.log(f"{self} Failed to display logo: {e}", RNS.LOG_WARNING)
         else:
-            # Explicitly disable external framebuffer to restore normal RNode UI
             try:
                 self.disable_external_framebuffer()
                 RNS.log(f"{self} Disabled external framebuffer on RNode", RNS.LOG_DEBUG)
             except Exception as e:
                 RNS.log(f"{self} Failed to disable framebuffer: {e}", RNS.LOG_WARNING)
 
-    def _read_loop(self):
-        """Background thread for reading and parsing KISS frames."""
-        in_frame = False
-        escape = False
-        command = KISS.CMD_UNKNOWN
-        data_buffer = b""
+    def _read_loop(self, bridge=None, label="RNode"):
+        """Background thread for reading and parsing KISS frames.
 
-        RNS.log("RNode read loop started", RNS.LOG_DEBUG)
-
-        while self._running.is_set():
-            try:
-                # Read available data
-                raw_data = self.kotlin_bridge.read()
-                # Convert to bytes if needed (Chaquopy may return jarray)
-                if hasattr(raw_data, '__len__'):
-                    data = bytes(raw_data)
-                else:
-                    data = bytes(raw_data) if raw_data else b""
-
-                if len(data) == 0:
-                    time.sleep(0.01)
-                    continue
-
-                # Parse KISS frames
-                RNS.log(f"RNode parsing {len(data)} bytes: {data.hex()}", RNS.LOG_DEBUG)
-                for byte in data:
-                    if in_frame and byte == KISS.FEND and command == KISS.CMD_DATA:
-                        # End of data frame
-                        in_frame = False
-                        self._process_incoming(data_buffer)
-                        data_buffer = b""
-                    elif byte == KISS.FEND:
-                        # Start of frame
-                        in_frame = True
-                        command = KISS.CMD_UNKNOWN
-                        data_buffer = b""
-                    elif in_frame and len(data_buffer) < 512:
-                        if escape:
-                            if byte == KISS.TFEND:
-                                data_buffer += bytes([KISS.FEND])
-                            elif byte == KISS.TFESC:
-                                data_buffer += bytes([KISS.FESC])
-                            else:
-                                # Invalid escape sequence - FESC should only be followed by TFEND or TFESC
-                                RNS.log(f"Invalid KISS escape sequence: FESC followed by 0x{byte:02X}", RNS.LOG_WARNING)
-                                data_buffer += bytes([byte])
-                            escape = False
-                        elif byte == KISS.FESC:
-                            escape = True
-                        elif command == KISS.CMD_UNKNOWN:
-                            command = byte
-                        elif command == KISS.CMD_DATA:
-                            data_buffer += bytes([byte])
-                        elif command == KISS.CMD_FREQUENCY:
-                            if len(data_buffer) < 4:
-                                data_buffer += bytes([byte])
-                                if len(data_buffer) == 4:
-                                    freq = (data_buffer[0] << 24) | (data_buffer[1] << 16) | (data_buffer[2] << 8) | data_buffer[3]
-                                    with self._read_lock:
-                                        self.r_frequency = freq
-                                    RNS.log(f"RNode frequency: {freq}", RNS.LOG_DEBUG)
-                        elif command == KISS.CMD_BANDWIDTH:
-                            if len(data_buffer) < 4:
-                                data_buffer += bytes([byte])
-                                if len(data_buffer) == 4:
-                                    bw = (data_buffer[0] << 24) | (data_buffer[1] << 16) | (data_buffer[2] << 8) | data_buffer[3]
-                                    with self._read_lock:
-                                        self.r_bandwidth = bw
-                                    RNS.log(f"RNode bandwidth: {bw}", RNS.LOG_DEBUG)
-                        elif command == KISS.CMD_TXPOWER:
-                            with self._read_lock:
-                                self.r_txpower = byte
-                            RNS.log(f"RNode TX power: {byte}", RNS.LOG_DEBUG)
-                        elif command == KISS.CMD_SF:
-                            with self._read_lock:
-                                self.r_sf = byte
-                            RNS.log(f"RNode SF: {byte}", RNS.LOG_DEBUG)
-                        elif command == KISS.CMD_CR:
-                            with self._read_lock:
-                                self.r_cr = byte
-                            RNS.log(f"RNode CR: {byte}", RNS.LOG_DEBUG)
-                        elif command == KISS.CMD_RADIO_STATE:
-                            with self._read_lock:
-                                self.r_state = byte
-                            RNS.log(f"RNode radio state: {byte}", RNS.LOG_DEBUG)
-                        elif command == KISS.CMD_STAT_RSSI:
-                            with self._read_lock:
-                                self.r_stat_rssi = byte - 157  # RSSI offset
-                        elif command == KISS.CMD_STAT_SNR:
-                            with self._read_lock:
-                                self.r_stat_snr = int.from_bytes([byte], "big", signed=True) / 4.0
-                        elif command == KISS.CMD_FW_VERSION:
-                            if len(data_buffer) < 2:
-                                data_buffer += bytes([byte])
-                                if len(data_buffer) == 2:
-                                    self.maj_version = data_buffer[0]
-                                    self.min_version = data_buffer[1]
-                                    self._validate_firmware()
-                        elif command == KISS.CMD_PLATFORM:
-                            self.platform = byte
-                        elif command == KISS.CMD_MCU:
-                            self.mcu = byte
-                        elif command == KISS.CMD_DETECT:
-                            if byte == KISS.DETECT_RESP:
-                                self.detected = True
-                                RNS.log("RNode detected!", RNS.LOG_DEBUG)
-                        elif command == KISS.CMD_ERROR:
-                            error_message = KISS.get_error_message(byte)
-                            RNS.log(f"RNode error (0x{byte:02X}): {error_message}", RNS.LOG_ERROR)
-                            # Surface error to UI via callback
-                            if self._on_error_callback:
-                                try:
-                                    self._on_error_callback(byte, error_message)
-                                except Exception as cb_err:
-                                    RNS.log(f"Error callback failed: {cb_err}", RNS.LOG_ERROR)
-                        elif command == KISS.CMD_READY:
-                            pass  # Device ready
-
-            except Exception as e:
-                if self._running.is_set():
-                    RNS.log(f"Read loop error: {e}", RNS.LOG_ERROR)
-                    time.sleep(0.1)
-
-        RNS.log("RNode read loop stopped", RNS.LOG_DEBUG)
-
-    def _read_loop_usb(self):
-        """Background thread for reading and parsing KISS frames from USB.
-
-        Similar to _read_loop but uses USB bridge instead of Bluetooth bridge,
-        and includes handling for CMD_BT_PIN during Bluetooth pairing mode.
+        Args:
+            bridge: The bridge to read from (kotlin_bridge or usb_bridge).
+                    Defaults to self.kotlin_bridge.
+            label: Log prefix for this read loop.
         """
+        if bridge is None:
+            bridge = self.kotlin_bridge
+        is_usb = (self.connection_mode == self.MODE_USB)
+
         in_frame = False
         escape = False
         command = KISS.CMD_UNKNOWN
         data_buffer = b""
 
-        RNS.log("RNode USB read loop started", RNS.LOG_DEBUG)
+        RNS.log(f"{label} read loop started", RNS.LOG_DEBUG)
 
         while self._running.is_set():
             try:
-                # Read available data from USB bridge
-                raw_data = self.usb_bridge.read()
-                # Convert to bytes if needed (Chaquopy may return jarray)
+                raw_data = bridge.read()
                 if hasattr(raw_data, '__len__'):
                     data = bytes(raw_data)
                 else:
@@ -940,16 +822,13 @@ class RNodeInterface:
                     time.sleep(0.01)
                     continue
 
-                # Parse KISS frames
-                RNS.log(f"RNode USB parsing {len(data)} bytes: {data.hex()}", RNS.LOG_DEBUG)
+                RNS.log(f"{label} parsing {len(data)} bytes: {data.hex()}", RNS.LOG_DEBUG)
                 for byte in data:
                     if in_frame and byte == KISS.FEND and command == KISS.CMD_DATA:
-                        # End of data frame
                         in_frame = False
                         self._process_incoming(data_buffer)
                         data_buffer = b""
                     elif byte == KISS.FEND:
-                        # Start of frame
                         in_frame = True
                         command = KISS.CMD_UNKNOWN
                         data_buffer = b""
@@ -960,7 +839,6 @@ class RNodeInterface:
                             elif byte == KISS.TFESC:
                                 data_buffer += bytes([KISS.FESC])
                             else:
-                                # Invalid escape sequence
                                 RNS.log(f"Invalid KISS escape sequence: FESC followed by 0x{byte:02X}", RNS.LOG_WARNING)
                                 data_buffer += bytes([byte])
                             escape = False
@@ -1023,8 +901,8 @@ class RNodeInterface:
                             if byte == KISS.DETECT_RESP:
                                 self.detected = True
                                 RNS.log("RNode detected!", RNS.LOG_DEBUG)
-                        elif command == KISS.CMD_BT_PIN:
-                            # Bluetooth PIN response during pairing mode
+                        elif command == KISS.CMD_BT_PIN and is_usb:
+                            # Bluetooth PIN response during pairing mode (USB only)
                             # PIN is sent as 4-byte big-endian integer by RNode firmware
                             if len(data_buffer) < 4:
                                 data_buffer += bytes([byte])
@@ -1032,8 +910,6 @@ class RNodeInterface:
                                     pin_value = int.from_bytes(data_buffer, byteorder='big')
                                     pin = f"{pin_value:06d}"
                                     RNS.log(f"RNode Bluetooth PIN: {pin}", RNS.LOG_INFO)
-                                    # Note: Kotlin USB bridge also parses PIN and notifies UI
-                                    # This is a backup notification in case Kotlin missed it
                                     if self.usb_bridge:
                                         try:
                                             self.usb_bridge.notifyBluetoothPin(pin)
@@ -1042,7 +918,6 @@ class RNodeInterface:
                         elif command == KISS.CMD_ERROR:
                             error_message = KISS.get_error_message(byte)
                             RNS.log(f"RNode error (0x{byte:02X}): {error_message}", RNS.LOG_ERROR)
-                            # Surface error to UI via callback
                             if self._on_error_callback:
                                 try:
                                     self._on_error_callback(byte, error_message)
@@ -1053,10 +928,10 @@ class RNodeInterface:
 
             except Exception as e:
                 if self._running.is_set():
-                    RNS.log(f"USB read loop error: {e}", RNS.LOG_ERROR)
+                    RNS.log(f"{label} read loop error: {e}", RNS.LOG_ERROR)
                     time.sleep(0.1)
 
-        RNS.log("RNode USB read loop stopped", RNS.LOG_DEBUG)
+        RNS.log(f"{label} read loop stopped", RNS.LOG_DEBUG)
 
     def _validate_firmware(self):
         """Check if firmware version is acceptable."""
@@ -1094,8 +969,11 @@ class RNodeInterface:
             RNS.log(f"RNode disconnected: {device_name}", RNS.LOG_WARNING)
             self._set_online(False)
             self.detected = False
-            # Start auto-reconnection if not already reconnecting
-            self._start_reconnection_loop()
+            # Only auto-reconnect if the interface is still running
+            # (stop() clears _running before calling disconnect, so this
+            # prevents the disconnect callback from re-connecting)
+            if self._running.is_set():
+                self._start_reconnection_loop()
 
     def setOnErrorReceived(self, callback):
         """
@@ -1152,7 +1030,7 @@ class RNodeInterface:
     def _reconnection_loop(self):
         """Background thread that attempts to reconnect to the RNode."""
         attempt = 0
-        while self._reconnecting and attempt < self._max_reconnect_attempts:
+        while self._reconnecting and self._running.is_set() and attempt < self._max_reconnect_attempts:
             attempt += 1
             RNS.log(f"Reconnection attempt {attempt}/{self._max_reconnect_attempts} for {self.target_device_name}...", RNS.LOG_INFO)
 

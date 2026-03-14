@@ -60,6 +60,7 @@ class ReticulumBinding(private val storagePath: String, private val context: Con
         // Set up RNode bridges and create interfaces for any RNode configs
         val rnodeConfigs = interfaces.filterIsInstance<InterfaceConfig.RNodeInterface>()
             .filter { it.enabled }
+        Log.i(TAG, "Found ${rnodeConfigs.size} enabled RNode configs out of ${interfaces.size} total interfaces")
         if (rnodeConfigs.isNotEmpty()) {
             setupRNodeBridges(helper, rnodeConfigs)
         }

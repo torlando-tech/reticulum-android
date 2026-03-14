@@ -858,17 +858,19 @@ class KotlinRNodeBridge(
      * Disconnect from the current RNode device.
      */
     fun disconnect() {
-        if (!isConnected.get()) {
-            Log.d(TAG, "Not connected")
+        val wasConnected = isConnected.getAndSet(false)
+        val deviceName = connectedDeviceName
+        val mode = connectionMode
+
+        if (!wasConnected && mode == null) {
+            Log.d(TAG, "Not connected, no cleanup needed")
             return
         }
 
-        val deviceName = connectedDeviceName
-        val mode = connectionMode
-        Log.i(TAG, "Disconnecting from $deviceName (mode=$mode)...")
+        Log.i(TAG, "Disconnecting from $deviceName (mode=$mode, wasConnected=$wasConnected)...")
 
-        isConnected.set(false)
-
+        // Always attempt cleanup even if isConnected was already false,
+        // in case the GATT/socket is still open
         when (mode) {
             RNodeConnectionMode.CLASSIC -> cleanupClassic()
             RNodeConnectionMode.BLE -> cleanupBle()
@@ -885,7 +887,9 @@ class KotlinRNodeBridge(
         Log.i(TAG, "Disconnected from $deviceName")
 
         // Notify Python
-        onConnectionStateChanged?.callAttr("__call__", false, deviceName.orEmpty())
+        if (wasConnected) {
+            onConnectionStateChanged?.callAttr("__call__", false, deviceName.orEmpty())
+        }
     }
 
     /**

@@ -129,7 +129,7 @@ def set_usb_bridge(bridge):
     usb_bridge.set_usb_bridge(bridge)
 
 
-def create_rnode_interface(name, connection_mode, target_device, frequency, bandwidth, spreading_factor, coding_rate, tx_power):
+def create_rnode_interface(name, connection_mode, target_device, frequency, bandwidth, spreading_factor, coding_rate, tx_power, enable_framebuffer=True):
     """Create an RNode interface and register it with RNS Transport."""
     import rnode_interface as rni
 
@@ -149,6 +149,7 @@ def create_rnode_interface(name, connection_mode, target_device, frequency, band
         "spreading_factor": int(spreading_factor),
         "coding_rate": int(coding_rate),
         "tx_power": int(tx_power),
+        "enable_framebuffer": bool(enable_framebuffer),
     }
 
     iface = rni.RNodeInterface(owner, name, config)
@@ -171,7 +172,7 @@ def destroy_rnode_interfaces():
     global _rnode_interfaces
     for iface in _rnode_interfaces:
         try:
-            iface.detach()
+            iface.stop()
         except Exception:
             pass
     _rnode_interfaces = []
