@@ -1,0 +1,118 @@
+name: Tagged Release/Prerelease
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags (e.g., v1.0.0, v1.2.3-beta1)
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required to create releases and upload assets
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v5
+        with:
+          cache-read-only: false
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG_NAME#v}
+          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION from tag: $TAG_NAME"
+
+      - name: Build Release APK
+        run: |
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+          echo "✓ Release APK built successfully"
+
+      - name: Rename APK with version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          APK_DIR="app/build/outputs/apk/release"
+          APK=$(find "$APK_DIR" -name "*.apk" | head -1)
+          if [ -z "$APK" ]; then
+            echo "::error::No APK found in $APK_DIR"
+            exit 1
+          fi
+          cp "$APK" "reticulum-${VERSION}.apk"
+          ls -la reticulum-*.apk
+          echo "✓ Renamed APK"
+
+      - name: Generate SHA256 checksum
+        run: |
+          for apk in reticulum-*.apk; do
+            sha256sum "$apk" > "${apk}.sha256"
+          done
+          echo "✓ Generated SHA256 checksums"
+
+      - name: Read SHA256 checksums
+        id: sha256
+        run: |
+          CHECKSUMS=""
+          for checksum_file in reticulum-*.apk.sha256; do
+            CHECKSUMS="${CHECKSUMS}$(cat "$checksum_file")\n"
+          done
+          echo "checksums<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$CHECKSUMS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            reticulum-*.apk
+            reticulum-*.apk.sha256
+          draft: true
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+          generate_release_notes: true
+          body: |
+            ## Reticulum Android ${{ steps.version.outputs.version }}
+
+            ### Installation
+            Download the APK and install on your Android device.
+
+            | APK | Description |
+            |-----|-------------|
+            | `reticulum-${{ steps.version.outputs.version }}.apk` | Universal APK (all architectures) |
+
+            > **Note:** This APK is unsigned (debug key). Signed releases coming soon.
+
+            **SHA256 Checksums:**
+            ```
+            ${{ steps.sha256.outputs.checksums }}
+            ```
+
+            ### What's Changed
+            See the release notes below for details.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload APK as workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: reticulum-${{ steps.version.outputs.version }}-apk
+          path: reticulum-*.apk
+          retention-days: 30
