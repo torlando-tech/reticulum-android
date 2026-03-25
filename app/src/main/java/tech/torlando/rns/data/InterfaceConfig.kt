@@ -31,6 +31,10 @@ sealed class InterfaceConfig {
                             ifacSize = ifacSize, interfaceMode = interfaceMode,
                             targetHost = obj.optString("target_host", ""),
                             targetPort = obj.optInt("target_port", 4242),
+                            bootstrapOnly = obj.optBoolean("bootstrap_only", false),
+                            socksProxyEnabled = obj.optBoolean("socks_proxy_enabled", false),
+                            socksProxyHost = obj.optString("socks_proxy_host", "127.0.0.1"),
+                            socksProxyPort = obj.optInt("socks_proxy_port", 9050),
                         )
                         "tcp_server" -> TcpServer(
                             name = name.ifEmpty { "TCP Server" },
@@ -97,6 +101,10 @@ sealed class InterfaceConfig {
         override val interfaceMode: String = "full",
         val targetHost: String = "",
         val targetPort: Int = 4242,
+        val bootstrapOnly: Boolean = false,
+        val socksProxyEnabled: Boolean = false,
+        val socksProxyHost: String = "127.0.0.1",
+        val socksProxyPort: Int = 9050,
     ) : InterfaceConfig()
 
     data class TcpServer(

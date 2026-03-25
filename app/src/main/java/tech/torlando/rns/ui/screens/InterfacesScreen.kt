@@ -71,12 +71,14 @@ fun InterfacesScreen(
     viewModel: TransportViewModel,
     onNavigateToDiscovery: () -> Unit = {},
     onNavigateToRnodeWizard: () -> Unit = {},
+    onNavigateToTcpClientWizard: () -> Unit = {},
 ) {
     val interfaces by viewModel.interfaces.collectAsState()
     val liveStats by viewModel.interfaceStats.collectAsState()
     val serviceState by viewModel.serviceState.collectAsState()
+    val pendingRestart by viewModel.pendingRestart.collectAsState()
+    val isConnectedToSharedInstance by viewModel.isConnectedToSharedInstance.collectAsState()
     var showTypeSelector by remember { mutableStateOf(false) }
-    var showTcpClientDialog by remember { mutableStateOf(false) }
     var showTcpServerDialog by remember { mutableStateOf(false) }
     var showAutoDialog by remember { mutableStateOf(false) }
     var showUdpDialog by remember { mutableStateOf(false) }
@@ -157,6 +159,36 @@ fun InterfacesScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 item { Spacer(Modifier.height(8.dp)) }
+
+                // Restart required banner
+                if (pendingRestart) {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                            ),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    "Restart to apply changes",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(onClick = { viewModel.restartService() }) {
+                                    Text("Restart")
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // Discover Interfaces card
                 if (isRunning) {
@@ -242,6 +274,7 @@ fun InterfacesScreen(
                                 config = config,
                                 liveStats = live,
                                 isRunning = isRunning,
+                                isConnectedToSharedInstance = isConnectedToSharedInstance,
                                 onDelete = { pendingDeleteIndex = index },
                                 peerCount = peerCount,
                             )
@@ -268,23 +301,13 @@ fun InterfacesScreen(
             onTypeSelected = { type ->
                 showTypeSelector = false
                 when (type) {
-                    "tcp_client" -> showTcpClientDialog = true
+                    "tcp_client" -> onNavigateToTcpClientWizard()
                     "tcp_server" -> showTcpServerDialog = true
                     "auto" -> showAutoDialog = true
                     "udp" -> showUdpDialog = true
                     "i2p" -> showI2pDialog = true
                     "rnode" -> onNavigateToRnodeWizard()
                 }
-            },
-        )
-    }
-
-    if (showTcpClientDialog) {
-        TcpClientAddDialog(
-            onDismiss = { showTcpClientDialog = false },
-            onAdd = { config ->
-                viewModel.addInterface(config)
-                showTcpClientDialog = false
             },
         )
     }
@@ -363,6 +386,7 @@ private fun ConfiguredInterfaceCard(
     config: InterfaceConfig,
     liveStats: InterfaceStats?,
     isRunning: Boolean,
+    isConnectedToSharedInstance: Boolean = false,
     onDelete: () -> Unit,
     peerCount: Int = 0,
 ) {
@@ -399,6 +423,10 @@ private fun ConfiguredInterfaceCard(
         liveStats != null -> {
             statusText = "Offline"
             statusColor = StatusOffline
+        }
+        isConnectedToSharedInstance -> {
+            statusText = "Via Shared Instance"
+            statusColor = MaterialTheme.colorScheme.onSurfaceVariant
         }
         else -> {
             statusText = "Not Active"
@@ -770,61 +798,6 @@ private fun InterfaceTypeSelectorDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
         },
-    )
-}
-
-// -- TCP Client add dialog --
-
-@Composable
-private fun TcpClientAddDialog(
-    onDismiss: () -> Unit,
-    onAdd: (InterfaceConfig) -> Unit,
-) {
-    var name by remember { mutableStateOf("") }
-    var host by remember { mutableStateOf("") }
-    var port by remember { mutableStateOf("4242") }
-    val adv = rememberCommonIfacState()
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add TCP Client") },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedTextField(
-                    value = name, onValueChange = { name = it },
-                    label = { Text("Name") }, placeholder = { Text("TCP Client") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true,
-                )
-                OutlinedTextField(
-                    value = host, onValueChange = { host = it },
-                    label = { Text("Host") }, placeholder = { Text("amsterdam.connect.reticulum.network") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true,
-                )
-                OutlinedTextField(
-                    value = port, onValueChange = { port = it },
-                    label = { Text("Port") }, modifier = Modifier.fillMaxWidth(),
-                    singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                )
-                AdvancedInterfaceFields(adv)
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    onAdd(InterfaceConfig.TcpClient(
-                        name = name.ifBlank { "TCP Client" },
-                        targetHost = host, targetPort = port.toIntOrNull() ?: 4242,
-                        networkName = adv.networkName, passphrase = adv.passphrase,
-                        ifacSize = adv.ifacSize.toIntOrNull() ?: 0, interfaceMode = adv.interfaceMode,
-                    ))
-                },
-                enabled = host.isNotBlank(),
-            ) { Text("Add") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 

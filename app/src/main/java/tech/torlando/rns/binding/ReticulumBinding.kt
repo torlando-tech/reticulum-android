@@ -138,6 +138,16 @@ class ReticulumBinding(private val storagePath: String, private val context: Con
         }
     }
 
+    fun isConnectedToSharedInstance(): Boolean {
+        return try {
+            val helper = py.getModule("rns_helper")
+            helper.callAttr("is_connected_to_shared_instance").toBoolean()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking shared instance status", e)
+            false
+        }
+    }
+
     fun isTransportEnabled(): Boolean {
         return try {
             val rns = py.getModule("RNS")

@@ -19,3 +19,4 @@ rootProject.name = "reticulum-android"
 include(":app")
 include(":bridges")
 include(":rnode-wizard")
+include(":tcp-client-wizard")

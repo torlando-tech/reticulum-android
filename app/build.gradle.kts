@@ -129,6 +129,7 @@ chaquopy {
 dependencies {
     implementation(project(":bridges"))
     implementation(project(":rnode-wizard"))
+    implementation(project(":tcp-client-wizard"))
 
     // Core
     implementation(libs.core.ktx)

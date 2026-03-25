@@ -26,6 +26,9 @@ import tech.torlando.rns.data.InterfaceConfig
 import tech.torlando.rns.rnode.data.RNodeWizardResult
 import tech.torlando.rns.rnode.ui.RNodeWizardScreen
 import tech.torlando.rns.rnode.viewmodel.RNodeWizardViewModel
+import tech.torlando.rns.tcpclient.data.TcpClientWizardResult
+import tech.torlando.rns.tcpclient.ui.TcpClientWizardScreen
+import tech.torlando.rns.tcpclient.viewmodel.TcpClientWizardViewModel
 import tech.torlando.rns.ui.screens.DiscoveredInterfacesScreen
 import tech.torlando.rns.ui.screens.HomeScreen
 import tech.torlando.rns.ui.screens.InterfacesScreen
@@ -85,6 +88,7 @@ fun AppNavigation(viewModel: TransportViewModel = viewModel()) {
                     viewModel = viewModel,
                     onNavigateToDiscovery = { navController.navigate("discovered_interfaces") },
                     onNavigateToRnodeWizard = { navController.navigate("rnode_wizard") },
+                    onNavigateToTcpClientWizard = { navController.navigate("tcp_client_wizard") },
                 )
             }
             composable(Screen.Monitor.route) { MonitorScreen(viewModel) }
@@ -93,6 +97,19 @@ fun AppNavigation(viewModel: TransportViewModel = viewModel()) {
                 DiscoveredInterfacesScreen(
                     viewModel = viewModel,
                     onNavigateBack = { navController.popBackStack() },
+                )
+            }
+            composable("tcp_client_wizard") {
+                val wizardViewModel: TcpClientWizardViewModel = viewModel()
+                TcpClientWizardScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onComplete = {
+                        wizardViewModel.state.value.savedResult?.let { result ->
+                            viewModel.addInterface(result.toInterfaceConfig())
+                        }
+                        navController.popBackStack()
+                    },
+                    viewModel = wizardViewModel,
                 )
             }
             composable("rnode_wizard") {
@@ -111,6 +128,18 @@ fun AppNavigation(viewModel: TransportViewModel = viewModel()) {
         }
     }
 }
+
+private fun TcpClientWizardResult.toInterfaceConfig() =
+    InterfaceConfig.TcpClient(
+        name = name,
+        enabled = true,
+        targetHost = targetHost,
+        targetPort = targetPort,
+        bootstrapOnly = bootstrapOnly,
+        socksProxyEnabled = socksProxyEnabled,
+        socksProxyHost = socksProxyHost,
+        socksProxyPort = socksProxyPort,
+    )
 
 private fun RNodeWizardResult.toInterfaceConfig() =
     InterfaceConfig.RNodeInterface(

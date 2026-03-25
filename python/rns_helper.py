@@ -178,6 +178,16 @@ def destroy_rnode_interfaces():
     _rnode_interfaces = []
 
 
+def is_connected_to_shared_instance():
+    """Check if this instance connected to an existing shared instance."""
+    ret_classes, _ = _get_classes()
+    for cls in ret_classes:
+        instance = getattr(cls, "_Reticulum__instance", None)
+        if instance is not None:
+            return getattr(instance, "is_connected_to_shared_instance", False)
+    return False
+
+
 def enable_discovery():
     """Enable interface discovery listener."""
     try:

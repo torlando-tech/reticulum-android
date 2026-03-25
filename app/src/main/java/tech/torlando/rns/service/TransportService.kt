@@ -78,6 +78,9 @@ class TransportService : Service() {
     private val _discoveryEnabled = MutableStateFlow(false)
     val discoveryEnabled: StateFlow<Boolean> = _discoveryEnabled.asStateFlow()
 
+    private val _isConnectedToSharedInstance = MutableStateFlow(false)
+    val isConnectedToSharedInstance: StateFlow<Boolean> = _isConnectedToSharedInstance.asStateFlow()
+
     override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onCreate() {
@@ -187,6 +190,7 @@ class TransportService : Service() {
                 binding = b
 
                 _transportIdentity.value = b.getTransportIdentityHash()
+                _isConnectedToSharedInstance.value = b.isConnectedToSharedInstance()
                 _serviceState.value = ServiceState.Running
 
                 updateNotification("Running")
@@ -222,6 +226,7 @@ class TransportService : Service() {
             _announceTable.value = emptyList()
             _discoveredInterfaces.value = emptyList()
             _discoveryEnabled.value = false
+            _isConnectedToSharedInstance.value = false
             _transportIdentity.value = null
             _serviceState.value = ServiceState.Stopped
             releaseWakeLock()

@@ -17,6 +17,9 @@ object ConfigGenerator {
         appendLine("  enable_transport = $transportEnabled")
         appendLine("  share_instance = ${if (shareInstance) "Yes" else "No"}")
         if (shareInstance) {
+            // Android apps are sandboxed — AF_UNIX abstract sockets are per-app.
+            // TCP mode is required for cross-app shared instance communication.
+            appendLine("  shared_instance_type = tcp")
             if (sharedInstancePort > 0) {
                 appendLine("  shared_instance_port = $sharedInstancePort")
             }
@@ -55,6 +58,13 @@ object ConfigGenerator {
                     appendLine("    enabled = yes")
                     appendLine("    target_host = ${iface.targetHost}")
                     appendLine("    target_port = ${iface.targetPort}")
+                    if (iface.bootstrapOnly) {
+                        appendLine("    bootstrap_only = true")
+                    }
+                    if (iface.socksProxyEnabled) {
+                        appendLine("    socks_host = ${iface.socksProxyHost}")
+                        appendLine("    socks_port = ${iface.socksProxyPort}")
+                    }
                 }
                 is InterfaceConfig.TcpServer -> {
                     appendLine("  [[${iface.name}]]")

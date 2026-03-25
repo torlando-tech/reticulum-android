@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.json.JSONArray
@@ -53,6 +54,12 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _discoveryEnabled = MutableStateFlow(false)
     val discoveryEnabled: StateFlow<Boolean> = _discoveryEnabled.asStateFlow()
+
+    private val _isConnectedToSharedInstance = MutableStateFlow(false)
+    val isConnectedToSharedInstance: StateFlow<Boolean> = _isConnectedToSharedInstance.asStateFlow()
+
+    private val _pendingRestart = MutableStateFlow(false)
+    val pendingRestart: StateFlow<Boolean> = _pendingRestart.asStateFlow()
 
     val transportEnabled = prefs.transportEnabled.stateIn(
         viewModelScope, SharingStarted.Eagerly, true,
@@ -104,6 +111,9 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
             viewModelScope.launch {
                 svc.discoveryEnabled.collect { _discoveryEnabled.value = it }
             }
+            viewModelScope.launch {
+                svc.isConnectedToSharedInstance.collect { _isConnectedToSharedInstance.value = it }
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -132,6 +142,7 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun startService() {
+        _pendingRestart.value = false
         val ctx = getApplication<Application>()
         val intent = Intent(ctx, TransportService::class.java).apply {
             action = TransportService.ACTION_START
@@ -143,15 +154,20 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
     fun stopService() {
         val svc = service ?: return
         svc.stopTransport()
-        // Stop the Android service once shutdown completes (state becomes Stopped)
         viewModelScope.launch {
-            svc.serviceState.collect { state ->
-                if (state is ServiceState.Stopped) {
-                    val ctx = getApplication<Application>()
-                    ctx.stopService(Intent(ctx, TransportService::class.java))
-                    return@collect
-                }
-            }
+            svc.serviceState.first { it is ServiceState.Stopped }
+            val ctx = getApplication<Application>()
+            ctx.stopService(Intent(ctx, TransportService::class.java))
+        }
+    }
+
+    fun restartService() {
+        _pendingRestart.value = false
+        val svc = service ?: return
+        svc.stopTransport()
+        viewModelScope.launch {
+            svc.serviceState.first { it is ServiceState.Stopped }
+            startService()
         }
     }
 
@@ -161,6 +177,9 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
             current.add(config)
             _interfaces.value = current
             prefs.setInterfacesJson(serializeInterfaces(current))
+            if (_serviceState.value is ServiceState.Running) {
+                _pendingRestart.value = true
+            }
         }
     }
 
@@ -171,6 +190,9 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
                 current.removeAt(index)
                 _interfaces.value = current
                 prefs.setInterfacesJson(serializeInterfaces(current))
+                if (_serviceState.value is ServiceState.Running) {
+                    _pendingRestart.value = true
+                }
             }
         }
     }
@@ -233,6 +255,10 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
                     obj.put("type", "tcp_client")
                     obj.put("target_host", iface.targetHost)
                     obj.put("target_port", iface.targetPort)
+                    obj.put("bootstrap_only", iface.bootstrapOnly)
+                    obj.put("socks_proxy_enabled", iface.socksProxyEnabled)
+                    obj.put("socks_proxy_host", iface.socksProxyHost)
+                    obj.put("socks_proxy_port", iface.socksProxyPort)
                 }
                 is InterfaceConfig.TcpServer -> {
                     obj.put("type", "tcp_server")

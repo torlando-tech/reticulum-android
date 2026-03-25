@@ -27,7 +27,7 @@ class PreferencesManager(private val context: Context) {
     }
 
     val transportEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        prefs[TRANSPORT_ENABLED] ?: true
+        prefs[TRANSPORT_ENABLED] ?: false
     }
 
     val shareInstance: Flow<Boolean> = context.dataStore.data.map { prefs ->
