@@ -19,9 +19,13 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -38,6 +42,8 @@ fun MonitorScreen(viewModel: TransportViewModel) {
     val interfaceStats by viewModel.interfaceStats.collectAsState()
     val pathTable by viewModel.pathTable.collectAsState()
     val announceTable by viewModel.announceTable.collectAsState()
+    var showAllPaths by remember { mutableStateOf(false) }
+    var showAllAnnounces by remember { mutableStateOf(false) }
 
     if (serviceState !is ServiceState.Running) {
         Column(
@@ -100,26 +106,40 @@ fun MonitorScreen(viewModel: TransportViewModel) {
                 )
             }
         } else {
-            items(pathTable) { entry ->
+            val pathPreviewCount = 5
+            val visiblePaths = if (showAllPaths) pathTable else pathTable.take(pathPreviewCount)
+            items(visiblePaths) { entry ->
                 PathEntryCard(entry)
+            }
+            if (pathTable.size > pathPreviewCount) {
+                item {
+                    TextButton(
+                        onClick = { showAllPaths = !showAllPaths },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (showAllPaths) "Show less" else "Show all ${pathTable.size} paths")
+                    }
+                }
             }
         }
 
         item {
             Spacer(Modifier.height(8.dp))
-            Text("Announce Table (${announceTable.size})", style = MaterialTheme.typography.titleMedium)
+            Text("Announce Queue (${announceTable.size})", style = MaterialTheme.typography.titleMedium)
         }
 
         if (announceTable.isEmpty()) {
             item {
                 Text(
-                    "No announces received",
+                    "No announces pending",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         } else {
-            items(announceTable) { entry ->
+            val announcePreviewCount = 5
+            val visibleAnnounces = if (showAllAnnounces) announceTable else announceTable.take(announcePreviewCount)
+            items(visibleAnnounces) { entry ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
@@ -137,6 +157,16 @@ fun MonitorScreen(viewModel: TransportViewModel) {
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                }
+            }
+            if (announceTable.size > announcePreviewCount) {
+                item {
+                    TextButton(
+                        onClick = { showAllAnnounces = !showAllAnnounces },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (showAllAnnounces) "Show less" else "Show all ${announceTable.size} announces")
                     }
                 }
             }
