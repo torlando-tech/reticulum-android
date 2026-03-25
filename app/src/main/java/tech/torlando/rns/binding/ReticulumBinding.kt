@@ -193,7 +193,7 @@ class ReticulumBinding(private val storagePath: String, private val context: Con
         return try {
             val rns = py.getModule("RNS")
             val transport = rns.get("Transport") ?: return emptyList()
-            val destinationTable = transport.get("destination_table")
+            val destinationTable = transport.get("path_table")
             if (destinationTable == null || destinationTable.callAttr("__len__").toInt() == 0) {
                 return emptyList()
             }
@@ -208,8 +208,8 @@ class ReticulumBinding(private val storagePath: String, private val context: Con
                     val entry = itemList[1].asList()
                     val timestamp = entry[0].toDouble()
                     val via = entry[1]?.toString() ?: ""
-                    val hops = entry[3]?.toInt() ?: 0
-                    val expires = entry[4]?.toDouble()?.toLong() ?: 0L
+                    val hops = entry[2]?.toInt() ?: 0
+                    val expires = entry[3]?.toDouble()?.toLong() ?: 0L
                     val ifaceName = entry[5]?.callAttr("__str__")?.toString() ?: "Unknown"
 
                     entries.add(
