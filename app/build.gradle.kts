@@ -130,6 +130,7 @@ dependencies {
     implementation(project(":bridges"))
     implementation(project(":rnode-wizard"))
     implementation(project(":tcp-client-wizard"))
+    implementation(project(":rns-stats"))
 
     // Core
     implementation(libs.core.ktx)

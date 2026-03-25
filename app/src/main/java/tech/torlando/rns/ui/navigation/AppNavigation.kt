@@ -31,6 +31,7 @@ import tech.torlando.rns.tcpclient.ui.TcpClientWizardScreen
 import tech.torlando.rns.tcpclient.viewmodel.TcpClientWizardViewModel
 import tech.torlando.rns.ui.screens.DiscoveredInterfacesScreen
 import tech.torlando.rns.ui.screens.HomeScreen
+import tech.torlando.rns.ui.screens.InterfaceStatsScreen
 import tech.torlando.rns.ui.screens.InterfacesScreen
 import tech.torlando.rns.ui.screens.MonitorScreen
 import tech.torlando.rns.ui.screens.SettingsScreen
@@ -89,12 +90,26 @@ fun AppNavigation(viewModel: TransportViewModel = viewModel()) {
                     onNavigateToDiscovery = { navController.navigate("discovered_interfaces") },
                     onNavigateToRnodeWizard = { navController.navigate("rnode_wizard") },
                     onNavigateToTcpClientWizard = { navController.navigate("tcp_client_wizard") },
+                    onNavigateToInterfaceStats = { name ->
+                        navController.navigate("interface_stats/${java.net.URLEncoder.encode(name, "UTF-8")}")
+                    },
                 )
             }
             composable(Screen.Monitor.route) { MonitorScreen(viewModel) }
             composable(Screen.Settings.route) { SettingsScreen(viewModel) }
             composable("discovered_interfaces") {
                 DiscoveredInterfacesScreen(
+                    viewModel = viewModel,
+                    onNavigateBack = { navController.popBackStack() },
+                )
+            }
+            composable("interface_stats/{name}") { backStackEntry ->
+                val name = java.net.URLDecoder.decode(
+                    backStackEntry.arguments?.getString("name") ?: "",
+                    "UTF-8",
+                )
+                InterfaceStatsScreen(
+                    interfaceName = name,
                     viewModel = viewModel,
                     onNavigateBack = { navController.popBackStack() },
                 )

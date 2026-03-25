@@ -16,6 +16,8 @@ import tech.torlando.rns.data.PathEntry
 import tech.torlando.rns.data.PreferencesManager
 import tech.torlando.rns.service.ServiceState
 import tech.torlando.rns.service.TransportService
+import tech.torlando.rns.stats.data.HistoryBuffer
+import tech.torlando.rns.stats.data.InterfaceHistoryPoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -61,6 +63,11 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
     private val _pendingRestart = MutableStateFlow(false)
     val pendingRestart: StateFlow<Boolean> = _pendingRestart.asStateFlow()
 
+    // Per-interface history buffers for traffic speed charts
+    private val historyBuffers = mutableMapOf<String, HistoryBuffer>()
+    private val _interfaceHistory = MutableStateFlow<Map<String, List<InterfaceHistoryPoint>>>(emptyMap())
+    val interfaceHistory: StateFlow<Map<String, List<InterfaceHistoryPoint>>> = _interfaceHistory.asStateFlow()
+
     val transportEnabled = prefs.transportEnabled.stateIn(
         viewModelScope, SharingStarted.Eagerly, true,
     )
@@ -94,7 +101,10 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
                 svc.serviceState.collect { _serviceState.value = it }
             }
             viewModelScope.launch {
-                svc.interfaceStats.collect { _interfaceStats.value = it }
+                svc.interfaceStats.collect { stats ->
+                    _interfaceStats.value = stats
+                    recordHistory(stats)
+                }
             }
             viewModelScope.launch {
                 svc.pathTable.collect { _pathTable.value = it }
@@ -214,6 +224,19 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
     fun toggleInterfaceEnabled(index: Int) {
         val config = _interfaces.value.getOrNull(index) ?: return
         updateInterface(index, config.withEnabled(!config.enabled))
+    }
+
+    private fun recordHistory(stats: List<InterfaceStats>) {
+        val now = System.currentTimeMillis()
+        val activeNames = mutableSetOf<String>()
+        for (stat in stats) {
+            activeNames.add(stat.name)
+            val buffer = historyBuffers.getOrPut(stat.name) { HistoryBuffer() }
+            buffer.add(InterfaceHistoryPoint(timestamp = now, rxBytes = stat.rxb, txBytes = stat.txb))
+        }
+        // Clean up buffers for interfaces that no longer exist
+        historyBuffers.keys.removeAll { it !in activeNames }
+        _interfaceHistory.value = historyBuffers.mapValues { it.value.toList() }
     }
 
     fun setTransportEnabled(enabled: Boolean) {

@@ -176,6 +176,9 @@ class ReticulumBinding(private val storagePath: String, private val context: Con
                     rxb = iface.get("rxb")?.toLong() ?: 0,
                     txb = iface.get("txb")?.toLong() ?: 0,
                     online = iface.get("online")?.toBoolean() ?: false,
+                    reconnecting = try { iface.get("reconnecting")?.toBoolean() ?: false } catch (_: Exception) { false },
+                    neverConnected = try { iface.get("never_connected")?.toBoolean() ?: false } catch (_: Exception) { false },
+                    detached = try { iface.get("detached")?.toBoolean() ?: false } catch (_: Exception) { false },
                     type = iface.get("TYPE")?.toString() ?: "",
                     parentInterfaceName = parentName,
                 )

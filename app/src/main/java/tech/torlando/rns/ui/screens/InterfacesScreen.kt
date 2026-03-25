@@ -65,10 +65,12 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import tech.torlando.rns.data.InterfaceConfig
 import tech.torlando.rns.data.InterfaceStats
+import tech.torlando.rns.data.InterfaceStatus
 import tech.torlando.rns.service.ServiceState
 import tech.torlando.rns.viewmodel.TransportViewModel
 
 private val StatusOnline = Color(0xFF4CAF50)
+private val StatusConnecting = Color(0xFFFFC107)
 private val StatusOffline = Color(0xFF9E9E9E)
 
 @Composable
@@ -77,6 +79,7 @@ fun InterfacesScreen(
     onNavigateToDiscovery: () -> Unit = {},
     onNavigateToRnodeWizard: () -> Unit = {},
     onNavigateToTcpClientWizard: () -> Unit = {},
+    onNavigateToInterfaceStats: (String) -> Unit = {},
 ) {
     val interfaces by viewModel.interfaces.collectAsState()
     val liveStats by viewModel.interfaceStats.collectAsState()
@@ -280,6 +283,7 @@ fun InterfacesScreen(
                                 liveStats = live,
                                 isRunning = isRunning,
                                 isConnectedToSharedInstance = isConnectedToSharedInstance,
+                                onClick = { if (isRunning) onNavigateToInterfaceStats(config.name) },
                                 onToggle = { viewModel.toggleInterfaceEnabled(index) },
                                 onDelete = { pendingDeleteIndex = index },
                                 peerCount = peerCount,
@@ -394,6 +398,7 @@ private fun ConfiguredInterfaceCard(
     liveStats: InterfaceStats?,
     isRunning: Boolean,
     isConnectedToSharedInstance: Boolean = false,
+    onClick: () -> Unit = {},
     onToggle: () -> Unit = {},
     onDelete: () -> Unit,
     peerCount: Int = 0,
@@ -423,7 +428,6 @@ private fun ConfiguredInterfaceCard(
         is InterfaceConfig.RNodeInterface -> "${config.connectionMode} ${config.targetDevice}".trim().ifEmpty { "RNode" }
     }
 
-    val isOnline = liveStats?.online ?: false
     val statusText: String
     val statusColor: Color
     when {
@@ -435,13 +439,29 @@ private fun ConfiguredInterfaceCard(
             statusText = ""
             statusColor = StatusOffline
         }
-        liveStats != null && isOnline -> {
-            statusText = "Online"
-            statusColor = StatusOnline
-        }
         liveStats != null -> {
-            statusText = "Offline"
-            statusColor = StatusOffline
+            when (liveStats.status) {
+                InterfaceStatus.ONLINE -> {
+                    statusText = "Online"
+                    statusColor = StatusOnline
+                }
+                InterfaceStatus.CONNECTING -> {
+                    statusText = "Connecting"
+                    statusColor = StatusConnecting
+                }
+                InterfaceStatus.RECONNECTING -> {
+                    statusText = "Reconnecting"
+                    statusColor = StatusConnecting
+                }
+                InterfaceStatus.DETACHED -> {
+                    statusText = "Detached"
+                    statusColor = StatusOffline
+                }
+                InterfaceStatus.OFFLINE -> {
+                    statusText = "Offline"
+                    statusColor = StatusOffline
+                }
+            }
         }
         isConnectedToSharedInstance -> {
             statusText = "Via Shared Instance"
@@ -455,7 +475,8 @@ private fun ConfiguredInterfaceCard(
 
     val iconColor = when {
         !config.enabled -> StatusOffline
-        isRunning && isOnline -> StatusOnline
+        liveStats?.status == InterfaceStatus.ONLINE -> StatusOnline
+        liveStats?.status == InterfaceStatus.CONNECTING || liveStats?.status == InterfaceStatus.RECONNECTING -> StatusConnecting
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
@@ -467,7 +488,7 @@ private fun ConfiguredInterfaceCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .combinedClickable(
-                    onClick = {},
+                    onClick = onClick,
                     onLongClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         showContextMenu = true
