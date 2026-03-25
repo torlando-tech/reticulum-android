@@ -209,12 +209,31 @@ def list_discovered():
 
 
 def start(config_path, retries=3, delay=2.0):
-    """Initialize RNS. Retries on EADDRINUSE after stop()."""
+    """Initialize RNS. Retries on EADDRINUSE or unwanted shared-instance fallback."""
     last_error = None
     for attempt in range(retries):
         _reset_all()
         try:
-            return RNS.Reticulum(config_path)
+            instance = RNS.Reticulum(config_path)
+
+            # Detect unwanted shared-instance-client fallback. This happens
+            # when the old instance's TCP socket is still in TIME_WAIT and
+            # RNS silently connects as a client instead of binding as owner.
+            if getattr(instance, "is_connected_to_shared_instance", False):
+                RNS.log("Started as shared instance client unexpectedly, retrying...", RNS.LOG_WARNING)
+                try:
+                    cls_exit = type(instance)
+                    cls_exit.exit_handler()
+                except Exception:
+                    pass
+                _reset_all()
+                if attempt < retries - 1:
+                    time.sleep(delay)
+                    continue
+                # Last attempt — return what we got
+                RNS.log("Could not become shared instance owner after retries", RNS.LOG_WARNING)
+            return instance
+
         except BaseException as e:
             last_error = e
             # Unwrap SystemExit to get at the original error context
@@ -242,11 +261,38 @@ def start(config_path, retries=3, delay=2.0):
 
 
 def stop():
-    """Shut down RNS and fully reset all singleton state for restart."""
-    # 0. Destroy RNode interfaces first
+    """Shut down RNS and reset singleton state for restart.
+
+    Uses the official exit_handler() which properly detaches all interfaces
+    (joining detach threads), saves state, etc. We add:
+    - RNode cleanup (managed outside RNS Transport)
+    - ThreadingTCPServer shutdown (not handled by exit_handler for TCP mode)
+    - Singleton reset (so Reticulum() can be called again in-process)
+    """
+    # 1. Destroy RNode interfaces (managed outside RNS Transport)
     destroy_rnode_interfaces()
 
-    # 1. Run the official exit handler
+    # 2. Shut down the shared instance ThreadingTCPServer if present.
+    #    RNS exit_handler() calls detach_interfaces() which handles the epoll
+    #    backend via deregister_listeners(), but the non-epoll ThreadingTCPServer
+    #    path has a no-op detach(). We must shut it down explicitly or it holds
+    #    the port and the next start() falls back to client mode.
+    try:
+        _, trn_classes = _get_classes()
+        for T in trn_classes:
+            for iface in list(getattr(T, 'interfaces', [])):
+                server = getattr(iface, 'server', None)
+                if server is not None:
+                    try:
+                        server.shutdown()
+                        server.server_close()
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    # 3. Run the official exit handler — detaches all interfaces
+    #    (joining detach threads), saves path table, etc.
     try:
         ret_classes, _ = _get_classes()
         for cls in ret_classes:
@@ -259,28 +305,5 @@ def stop():
     except Exception:
         pass
 
-    # 2. Close any remaining sockets on interfaces
-    try:
-        _, trn_classes = _get_classes()
-        for T in trn_classes:
-            for iface in list(getattr(T, 'interfaces', [])):
-                try:
-                    if hasattr(iface, 'detach'):
-                        iface.detach()
-                except Exception:
-                    pass
-                for attr in ('socket', 'server_socket', 'listen_socket', '_socket'):
-                    try:
-                        sock = getattr(iface, attr, None)
-                        if isinstance(sock, socket.socket):
-                            sock.close()
-                    except Exception:
-                        pass
-    except Exception:
-        pass
-
-    # 3. Brief pause for OS to release socket descriptors
-    time.sleep(0.5)
-
-    # 4. Reset all state
+    # 4. Reset singleton state so Reticulum() can be called again
     _reset_all()
