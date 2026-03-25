@@ -290,10 +290,10 @@ class TransportService : Service() {
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Reticulum Transport",
+            "Reticulum",
             NotificationManager.IMPORTANCE_LOW,
         ).apply {
-            description = "Reticulum transport node service"
+            description = "Reticulum network stack service"
             setShowBadge(false)
         }
         val nm = getSystemService(NotificationManager::class.java)
@@ -316,7 +316,7 @@ class TransportService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Reticulum Transport")
+            .setContentTitle("Reticulum")
             .setContentText(status)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)

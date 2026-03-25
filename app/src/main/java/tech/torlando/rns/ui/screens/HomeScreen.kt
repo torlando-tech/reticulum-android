@@ -47,7 +47,7 @@ fun HomeScreen(viewModel: TransportViewModel) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = "Reticulum Transport",
+            text = "Reticulum",
             style = MaterialTheme.typography.headlineMedium,
         )
 
@@ -66,7 +66,7 @@ fun HomeScreen(viewModel: TransportViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(Icons.Default.PlayArrow, contentDescription = null)
-                    Text("  Start Transport")
+                    Text("  Start Reticulum")
                 }
             }
             is ServiceState.Running -> {
@@ -78,7 +78,7 @@ fun HomeScreen(viewModel: TransportViewModel) {
                     ),
                 ) {
                     Icon(Icons.Default.Stop, contentDescription = null)
-                    Text("  Stop Transport")
+                    Text("  Stop Reticulum")
                 }
             }
             is ServiceState.Starting -> {
