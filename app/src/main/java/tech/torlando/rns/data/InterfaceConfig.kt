@@ -10,6 +10,15 @@ sealed class InterfaceConfig {
     abstract val ifacSize: Int
     abstract val interfaceMode: String
 
+    fun withEnabled(enabled: Boolean): InterfaceConfig = when (this) {
+        is TcpClient -> copy(enabled = enabled)
+        is TcpServer -> copy(enabled = enabled)
+        is AutoInterface -> copy(enabled = enabled)
+        is UdpInterface -> copy(enabled = enabled)
+        is I2PInterface -> copy(enabled = enabled)
+        is RNodeInterface -> copy(enabled = enabled)
+    }
+
     companion object {
         fun fromJson(json: String): List<InterfaceConfig> {
             if (json.isBlank() || json == "[]") return emptyList()

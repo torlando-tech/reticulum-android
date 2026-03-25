@@ -204,8 +204,16 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
                 current[index] = config
                 _interfaces.value = current
                 prefs.setInterfacesJson(serializeInterfaces(current))
+                if (_serviceState.value is ServiceState.Running) {
+                    _pendingRestart.value = true
+                }
             }
         }
+    }
+
+    fun toggleInterfaceEnabled(index: Int) {
+        val config = _interfaces.value.getOrNull(index) ?: return
+        updateInterface(index, config.withEnabled(!config.enabled))
     }
 
     fun setTransportEnabled(enabled: Boolean) {

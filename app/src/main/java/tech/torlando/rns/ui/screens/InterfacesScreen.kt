@@ -1,6 +1,8 @@
 package tech.torlando.rns.ui.screens
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +24,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.CellTower
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -56,6 +59,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import tech.torlando.rns.data.InterfaceConfig
@@ -275,6 +280,7 @@ fun InterfacesScreen(
                                 liveStats = live,
                                 isRunning = isRunning,
                                 isConnectedToSharedInstance = isConnectedToSharedInstance,
+                                onToggle = { viewModel.toggleInterfaceEnabled(index) },
                                 onDelete = { pendingDeleteIndex = index },
                                 peerCount = peerCount,
                             )
@@ -381,12 +387,14 @@ fun InterfacesScreen(
 
 // -- Configured interface card with live status --
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ConfiguredInterfaceCard(
     config: InterfaceConfig,
     liveStats: InterfaceStats?,
     isRunning: Boolean,
     isConnectedToSharedInstance: Boolean = false,
+    onToggle: () -> Unit = {},
     onDelete: () -> Unit,
     peerCount: Int = 0,
 ) {
@@ -398,6 +406,14 @@ private fun ConfiguredInterfaceCard(
         is InterfaceConfig.I2PInterface -> Icons.Filled.Security
         is InterfaceConfig.RNodeInterface -> Icons.Filled.SettingsInputAntenna
     }
+    val typeName = when (config) {
+        is InterfaceConfig.TcpClient -> "TCP Client"
+        is InterfaceConfig.TcpServer -> "TCP Server"
+        is InterfaceConfig.AutoInterface -> "Auto Discovery"
+        is InterfaceConfig.UdpInterface -> "UDP Interface"
+        is InterfaceConfig.I2PInterface -> "I2P Network"
+        is InterfaceConfig.RNodeInterface -> "RNode LoRa"
+    }
     val target = when (config) {
         is InterfaceConfig.TcpClient -> "${config.targetHost}:${config.targetPort}"
         is InterfaceConfig.TcpServer -> "${config.listenIp}:${config.listenPort}"
@@ -407,14 +423,17 @@ private fun ConfiguredInterfaceCard(
         is InterfaceConfig.RNodeInterface -> "${config.connectionMode} ${config.targetDevice}".trim().ifEmpty { "RNode" }
     }
 
-    // Determine status from live data when running, otherwise from config
     val isOnline = liveStats?.online ?: false
     val statusText: String
     val statusColor: Color
     when {
+        !config.enabled -> {
+            statusText = "Disabled"
+            statusColor = StatusOffline
+        }
         !isRunning -> {
-            statusText = if (config.enabled) "Enabled" else "Disabled"
-            statusColor = if (config.enabled) MaterialTheme.colorScheme.onSurfaceVariant else StatusOffline
+            statusText = ""
+            statusColor = StatusOffline
         }
         liveStats != null && isOnline -> {
             statusText = "Online"
@@ -429,24 +448,31 @@ private fun ConfiguredInterfaceCard(
             statusColor = MaterialTheme.colorScheme.onSurfaceVariant
         }
         else -> {
-            statusText = "Not Active"
+            statusText = "Offline"
             statusColor = StatusOffline
         }
     }
 
     val iconColor = when {
-        !isRunning -> if (config.enabled) MaterialTheme.colorScheme.onSurfaceVariant else StatusOffline
-        isOnline -> StatusOnline
-        else -> StatusOffline
+        !config.enabled -> StatusOffline
+        isRunning && isOnline -> StatusOnline
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     var showContextMenu by remember { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
 
     Box {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { showContextMenu = true },
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        showContextMenu = true
+                    },
+                ),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
             ),
@@ -472,25 +498,25 @@ private fun ConfiguredInterfaceCard(
                         style = MaterialTheme.typography.titleMedium,
                     )
                     Text(
+                        text = typeName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
                         text = target,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    if (liveStats != null) {
-                        Text(
-                            text = "RX ${formatBytes(liveStats.rxb)} / TX ${formatBytes(liveStats.txb)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
                 }
 
                 Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = statusText,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = statusColor,
-                    )
+                    if (statusText.isNotEmpty()) {
+                        Text(
+                            text = statusText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = statusColor,
+                        )
+                    }
                     if (peerCount > 0) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -509,6 +535,10 @@ private fun ConfiguredInterfaceCard(
                             )
                         }
                     }
+                    Switch(
+                        checked = config.enabled,
+                        onCheckedChange = { onToggle() },
+                    )
                 }
             }
         }
