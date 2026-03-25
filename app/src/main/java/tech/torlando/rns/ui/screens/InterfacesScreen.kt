@@ -92,6 +92,7 @@ fun InterfacesScreen(
     var showUdpDialog by remember { mutableStateOf(false) }
     var showI2pDialog by remember { mutableStateOf(false) }
     var pendingDeleteIndex by remember { mutableStateOf<Int?>(null) }
+    var editingIndex by remember { mutableStateOf<Int?>(null) }
 
     val isRunning = serviceState is ServiceState.Running
 
@@ -167,6 +168,26 @@ fun InterfacesScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 item { Spacer(Modifier.height(8.dp)) }
+
+                // Shared instance info banner
+                if (isRunning && isConnectedToSharedInstance) {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            ),
+                        ) {
+                            Text(
+                                "Connected to another app's shared Reticulum instance. " +
+                                    "Interfaces are managed by that instance.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(16.dp),
+                            )
+                        }
+                    }
+                }
 
                 // Restart required banner
                 if (pendingRestart) {
@@ -282,9 +303,19 @@ fun InterfacesScreen(
                                 config = config,
                                 liveStats = live,
                                 isRunning = isRunning,
-                                isConnectedToSharedInstance = isConnectedToSharedInstance,
                                 onClick = { if (isRunning) onNavigateToInterfaceStats(config.name) },
                                 onToggle = { viewModel.toggleInterfaceEnabled(index) },
+                                onEdit = {
+                                    editingIndex = index
+                                    when (config) {
+                                        is InterfaceConfig.TcpClient -> onNavigateToTcpClientWizard()
+                                        is InterfaceConfig.TcpServer -> showTcpServerDialog = true
+                                        is InterfaceConfig.AutoInterface -> showAutoDialog = true
+                                        is InterfaceConfig.UdpInterface -> showUdpDialog = true
+                                        is InterfaceConfig.I2PInterface -> showI2pDialog = true
+                                        is InterfaceConfig.RNodeInterface -> onNavigateToRnodeWizard()
+                                    }
+                                },
                                 onDelete = { pendingDeleteIndex = index },
                                 peerCount = peerCount,
                             )
@@ -323,41 +354,53 @@ fun InterfacesScreen(
     }
 
     if (showTcpServerDialog) {
+        val existing = editingIndex?.let { interfaces.getOrNull(it) as? InterfaceConfig.TcpServer }
         TcpServerAddDialog(
-            onDismiss = { showTcpServerDialog = false },
-            onAdd = { config ->
-                viewModel.addInterface(config)
-                showTcpServerDialog = false
+            existing = existing,
+            onDismiss = { showTcpServerDialog = false; editingIndex = null },
+            onSave = { config ->
+                if (editingIndex != null) viewModel.updateInterface(editingIndex!!, config)
+                else viewModel.addInterface(config)
+                showTcpServerDialog = false; editingIndex = null
             },
         )
     }
 
     if (showAutoDialog) {
+        val existing = editingIndex?.let { interfaces.getOrNull(it) as? InterfaceConfig.AutoInterface }
         AutoAddDialog(
-            onDismiss = { showAutoDialog = false },
-            onAdd = { config ->
-                viewModel.addInterface(config)
-                showAutoDialog = false
+            existing = existing,
+            onDismiss = { showAutoDialog = false; editingIndex = null },
+            onSave = { config ->
+                if (editingIndex != null) viewModel.updateInterface(editingIndex!!, config)
+                else viewModel.addInterface(config)
+                showAutoDialog = false; editingIndex = null
             },
         )
     }
 
     if (showUdpDialog) {
+        val existing = editingIndex?.let { interfaces.getOrNull(it) as? InterfaceConfig.UdpInterface }
         UdpAddDialog(
-            onDismiss = { showUdpDialog = false },
-            onAdd = { config ->
-                viewModel.addInterface(config)
-                showUdpDialog = false
+            existing = existing,
+            onDismiss = { showUdpDialog = false; editingIndex = null },
+            onSave = { config ->
+                if (editingIndex != null) viewModel.updateInterface(editingIndex!!, config)
+                else viewModel.addInterface(config)
+                showUdpDialog = false; editingIndex = null
             },
         )
     }
 
     if (showI2pDialog) {
+        val existing = editingIndex?.let { interfaces.getOrNull(it) as? InterfaceConfig.I2PInterface }
         I2pAddDialog(
-            onDismiss = { showI2pDialog = false },
-            onAdd = { config ->
-                viewModel.addInterface(config)
-                showI2pDialog = false
+            existing = existing,
+            onDismiss = { showI2pDialog = false; editingIndex = null },
+            onSave = { config ->
+                if (editingIndex != null) viewModel.updateInterface(editingIndex!!, config)
+                else viewModel.addInterface(config)
+                showI2pDialog = false; editingIndex = null
             },
         )
     }
@@ -397,9 +440,9 @@ private fun ConfiguredInterfaceCard(
     config: InterfaceConfig,
     liveStats: InterfaceStats?,
     isRunning: Boolean,
-    isConnectedToSharedInstance: Boolean = false,
     onClick: () -> Unit = {},
     onToggle: () -> Unit = {},
+    onEdit: () -> Unit = {},
     onDelete: () -> Unit,
     peerCount: Int = 0,
 ) {
@@ -462,10 +505,6 @@ private fun ConfiguredInterfaceCard(
                     statusColor = StatusOffline
                 }
             }
-        }
-        isConnectedToSharedInstance -> {
-            statusText = "Via Shared Instance"
-            statusColor = MaterialTheme.colorScheme.onSurfaceVariant
         }
         else -> {
             statusText = "Offline"
@@ -568,6 +607,16 @@ private fun ConfiguredInterfaceCard(
             expanded = showContextMenu,
             onDismissRequest = { showContextMenu = false },
         ) {
+            DropdownMenuItem(
+                text = { Text("Edit") },
+                onClick = {
+                    showContextMenu = false
+                    onEdit()
+                },
+                leadingIcon = {
+                    Icon(Icons.Default.Edit, contentDescription = null)
+                },
+            )
             DropdownMenuItem(
                 text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
                 onClick = {
@@ -852,21 +901,23 @@ private fun InterfaceTypeSelectorDialog(
     )
 }
 
-// -- TCP Server add dialog --
+// -- TCP Server dialog (add/edit) --
 
 @Composable
 private fun TcpServerAddDialog(
+    existing: InterfaceConfig.TcpServer? = null,
     onDismiss: () -> Unit,
-    onAdd: (InterfaceConfig) -> Unit,
+    onSave: (InterfaceConfig) -> Unit,
 ) {
-    var name by remember { mutableStateOf("") }
-    var listenIp by remember { mutableStateOf("0.0.0.0") }
-    var port by remember { mutableStateOf("4242") }
-    val adv = rememberCommonIfacState()
+    val isEditing = existing != null
+    var name by remember { mutableStateOf(existing?.name ?: "") }
+    var listenIp by remember { mutableStateOf(existing?.listenIp ?: "0.0.0.0") }
+    var port by remember { mutableStateOf(existing?.listenPort?.toString() ?: "4242") }
+    val adv = rememberCommonIfacState(existing)
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add TCP Server") },
+        title = { Text(if (isEditing) "Edit TCP Server" else "Add TCP Server") },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -891,33 +942,36 @@ private fun TcpServerAddDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                onAdd(InterfaceConfig.TcpServer(
+                onSave(InterfaceConfig.TcpServer(
                     name = name.ifBlank { "TCP Server" },
+                    enabled = existing?.enabled ?: true,
                     listenIp = listenIp, listenPort = port.toIntOrNull() ?: 4242,
                     networkName = adv.networkName, passphrase = adv.passphrase,
                     ifacSize = adv.ifacSize.toIntOrNull() ?: 0, interfaceMode = adv.interfaceMode,
                 ))
-            }) { Text("Add") }
+            }) { Text(if (isEditing) "Save" else "Add") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
-// -- Auto add dialog --
+// -- Auto dialog (add/edit) --
 
 @Composable
 private fun AutoAddDialog(
+    existing: InterfaceConfig.AutoInterface? = null,
     onDismiss: () -> Unit,
-    onAdd: (InterfaceConfig) -> Unit,
+    onSave: (InterfaceConfig) -> Unit,
 ) {
-    var name by remember { mutableStateOf("") }
-    var groupId by remember { mutableStateOf("") }
-    var discoveryScope by remember { mutableStateOf("link") }
-    val adv = rememberCommonIfacState()
+    val isEditing = existing != null
+    var name by remember { mutableStateOf(existing?.name ?: "") }
+    var groupId by remember { mutableStateOf(existing?.groupId ?: "") }
+    var discoveryScope by remember { mutableStateOf(existing?.discoveryScope ?: "link") }
+    val adv = rememberCommonIfacState(existing)
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add Auto Interface") },
+        title = { Text(if (isEditing) "Edit Auto Interface" else "Add Auto Interface") },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -944,35 +998,38 @@ private fun AutoAddDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                onAdd(InterfaceConfig.AutoInterface(
+                onSave(InterfaceConfig.AutoInterface(
                     name = name.ifBlank { "Auto Interface" },
+                    enabled = existing?.enabled ?: true,
                     groupId = groupId, discoveryScope = discoveryScope.ifBlank { "link" },
                     networkName = adv.networkName, passphrase = adv.passphrase,
                     ifacSize = adv.ifacSize.toIntOrNull() ?: 0, interfaceMode = adv.interfaceMode,
                 ))
-            }) { Text("Add") }
+            }) { Text(if (isEditing) "Save" else "Add") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
-// -- UDP add dialog --
+// -- UDP dialog (add/edit) --
 
 @Composable
 private fun UdpAddDialog(
+    existing: InterfaceConfig.UdpInterface? = null,
     onDismiss: () -> Unit,
-    onAdd: (InterfaceConfig) -> Unit,
+    onSave: (InterfaceConfig) -> Unit,
 ) {
-    var name by remember { mutableStateOf("") }
-    var listenIp by remember { mutableStateOf("0.0.0.0") }
-    var listenPort by remember { mutableStateOf("") }
-    var forwardIp by remember { mutableStateOf("") }
-    var forwardPort by remember { mutableStateOf("") }
-    val adv = rememberCommonIfacState()
+    val isEditing = existing != null
+    var name by remember { mutableStateOf(existing?.name ?: "") }
+    var listenIp by remember { mutableStateOf(existing?.listenIp ?: "0.0.0.0") }
+    var listenPort by remember { mutableStateOf(existing?.listenPort?.toString() ?: "") }
+    var forwardIp by remember { mutableStateOf(existing?.forwardIp ?: "") }
+    var forwardPort by remember { mutableStateOf(existing?.forwardPort?.toString() ?: "") }
+    val adv = rememberCommonIfacState(existing)
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add UDP Interface") },
+        title = { Text(if (isEditing) "Edit UDP Interface" else "Add UDP Interface") },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -1007,8 +1064,9 @@ private fun UdpAddDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    onAdd(InterfaceConfig.UdpInterface(
+                    onSave(InterfaceConfig.UdpInterface(
                         name = name.ifBlank { "UDP Interface" },
+                        enabled = existing?.enabled ?: true,
                         listenIp = listenIp, listenPort = listenPort.toIntOrNull() ?: 0,
                         forwardIp = forwardIp, forwardPort = forwardPort.toIntOrNull() ?: 0,
                         networkName = adv.networkName, passphrase = adv.passphrase,
@@ -1016,27 +1074,29 @@ private fun UdpAddDialog(
                     ))
                 },
                 enabled = forwardIp.isNotBlank(),
-            ) { Text("Add") }
+            ) { Text(if (isEditing) "Save" else "Add") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
-// -- I2P add dialog --
+// -- I2P dialog (add/edit) --
 
 @Composable
 private fun I2pAddDialog(
+    existing: InterfaceConfig.I2PInterface? = null,
     onDismiss: () -> Unit,
-    onAdd: (InterfaceConfig) -> Unit,
+    onSave: (InterfaceConfig) -> Unit,
 ) {
-    var name by remember { mutableStateOf("") }
-    var peers by remember { mutableStateOf("") }
-    var connectable by remember { mutableStateOf(false) }
-    val adv = rememberCommonIfacState()
+    val isEditing = existing != null
+    var name by remember { mutableStateOf(existing?.name ?: "") }
+    var peers by remember { mutableStateOf(existing?.peers ?: "") }
+    var connectable by remember { mutableStateOf(existing?.connectable ?: false) }
+    val adv = rememberCommonIfacState(existing)
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add I2P Interface") },
+        title = { Text(if (isEditing) "Edit I2P Interface" else "Add I2P Interface") },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -1065,13 +1125,14 @@ private fun I2pAddDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                onAdd(InterfaceConfig.I2PInterface(
+                onSave(InterfaceConfig.I2PInterface(
                     name = name.ifBlank { "I2P Interface" },
+                    enabled = existing?.enabled ?: true,
                     peers = peers, connectable = connectable,
                     networkName = adv.networkName, passphrase = adv.passphrase,
                     ifacSize = adv.ifacSize.toIntOrNull() ?: 0, interfaceMode = adv.interfaceMode,
                 ))
-            }) { Text("Add") }
+            }) { Text(if (isEditing) "Save" else "Add") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
@@ -1090,7 +1151,18 @@ data class CommonIfacState(
 )
 
 @Composable
-private fun rememberCommonIfacState() = remember { CommonIfacState() }
+private fun rememberCommonIfacState(existing: InterfaceConfig? = null) = remember {
+    if (existing != null) {
+        CommonIfacState(
+            networkName = existing.networkName,
+            passphrase = existing.passphrase,
+            ifacSize = if (existing.ifacSize > 0) existing.ifacSize.toString() else "",
+            interfaceMode = existing.interfaceMode,
+        )
+    } else {
+        CommonIfacState()
+    }
+}
 
 @Composable
 private fun AdvancedInterfaceFields(state: CommonIfacState) {
