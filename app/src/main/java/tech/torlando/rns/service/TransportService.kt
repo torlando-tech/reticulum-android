@@ -8,31 +8,20 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.os.Binder
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import org.json.JSONArray
+import org.json.JSONObject
 import tech.torlando.rns.MainActivity
 import tech.torlando.rns.R
 import tech.torlando.rns.binding.ReticulumBinding
-import tech.torlando.rns.data.AnnounceEntry
-import tech.torlando.rns.data.DiscoveredInterface
 import tech.torlando.rns.data.InterfaceConfig
-import tech.torlando.rns.data.InterfaceStats
-import tech.torlando.rns.data.PathEntry
-import tech.torlando.rns.data.PreferencesManager
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
+import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 class TransportService : Service() {
 
@@ -41,88 +30,101 @@ class TransportService : Service() {
         private const val CHANNEL_ID = "reticulum_transport"
         private const val NOTIFICATION_ID = 1
         private const val STATS_POLL_INTERVAL_MS = 2000L
+        private const val SAVED_CONFIG_FILE = "saved_config.json"
 
         const val ACTION_START = "tech.torlando.rns.START"
         const val ACTION_STOP = "tech.torlando.rns.STOP"
     }
 
-    inner class LocalBinder : Binder() {
-        val service: TransportService get() = this@TransportService
-    }
-
-    private val binder = LocalBinder()
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var binding: ReticulumBinding? = null
-    private var statsJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
-    private lateinit var prefs: PreferencesManager
+    @Volatile private var currentState = "stopped"
+    @Volatile private var currentError: String? = null
+    @Volatile private var discoveryEnabled = false
+    @Volatile private var cachedSnapshot = ServiceSnapshot(state = "stopped").toJson()
 
-    private val _serviceState = MutableStateFlow<ServiceState>(ServiceState.Stopped)
-    val serviceState: StateFlow<ServiceState> = _serviceState.asStateFlow()
+    private val executor = Executors.newSingleThreadScheduledExecutor()
+    private var pollingFuture: ScheduledFuture<*>? = null
 
-    private val _interfaceStats = MutableStateFlow<List<InterfaceStats>>(emptyList())
-    val interfaceStats: StateFlow<List<InterfaceStats>> = _interfaceStats.asStateFlow()
+    // Simple single-callback — only one ViewModel connects
+    @Volatile private var callback: IRnsCallback? = null
 
-    private val _pathTable = MutableStateFlow<List<PathEntry>>(emptyList())
-    val pathTable: StateFlow<List<PathEntry>> = _pathTable.asStateFlow()
+    private val binder = object : IRnsService.Stub() {
+        override fun start(configJson: String?) {
+            if (configJson == null) return
+            if (currentState == "running" || currentState == "starting") return
+            currentState = "starting"
+            currentError = null
+            updateAndBroadcast(ServiceSnapshot(state = "starting"))
+            acquireWakeLock()
+            executor.execute { doStart(configJson) }
+        }
 
-    private val _announceTable = MutableStateFlow<List<AnnounceEntry>>(emptyList())
-    val announceTable: StateFlow<List<AnnounceEntry>> = _announceTable.asStateFlow()
+        override fun stop() {
+            executor.execute { doStop() }
+        }
 
-    private val _transportIdentity = MutableStateFlow<String?>(null)
-    val transportIdentity: StateFlow<String?> = _transportIdentity.asStateFlow()
+        override fun getSnapshot(): String = cachedSnapshot
 
-    private val _discoveredInterfaces = MutableStateFlow<List<DiscoveredInterface>>(emptyList())
-    val discoveredInterfaces: StateFlow<List<DiscoveredInterface>> = _discoveredInterfaces.asStateFlow()
+        override fun registerCallback(cb: IRnsCallback?) {
+            callback = cb
+            if (cb != null) {
+                try {
+                    cb.onUpdate(cachedSnapshot)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to push initial snapshot", e)
+                    callback = null
+                }
+            }
+        }
 
-    private val _discoveryEnabled = MutableStateFlow(false)
-    val discoveryEnabled: StateFlow<Boolean> = _discoveryEnabled.asStateFlow()
+        override fun unregisterCallback(cb: IRnsCallback?) {
+            callback = null
+        }
 
-    private val _isConnectedToSharedInstance = MutableStateFlow(false)
-    val isConnectedToSharedInstance: StateFlow<Boolean> = _isConnectedToSharedInstance.asStateFlow()
+        override fun enableDiscovery() {
+            executor.execute { doEnableDiscovery() }
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onCreate() {
         super.onCreate()
-        prefs = PreferencesManager(this)
         createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                stopTransport()
-                stopSelf()
+                executor.execute { doStop() }
             }
             ACTION_START -> {
-                // Explicit start from UI — safe to start foreground
                 startForeground(
                     NOTIFICATION_ID,
                     createNotification("Starting..."),
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
                 )
-                if (_serviceState.value !is ServiceState.Running &&
-                    _serviceState.value !is ServiceState.Starting
-                ) {
-                    startTransportFromPrefs()
-                }
             }
             else -> {
                 // Null intent = system restart via START_STICKY
                 try {
                     startForeground(
                         NOTIFICATION_ID,
-                        createNotification("Starting..."),
+                        createNotification("Restarting..."),
                         ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
                     )
-                    if (_serviceState.value !is ServiceState.Running &&
-                        _serviceState.value !is ServiceState.Starting
-                    ) {
-                        startTransportFromPrefs()
+                    val savedConfig = readSavedConfig()
+                    if (savedConfig != null && currentState == "stopped") {
+                        currentState = "starting"
+                        updateAndBroadcast(ServiceSnapshot(state = "starting"))
+                        acquireWakeLock()
+                        executor.execute { doStart(savedConfig) }
+                    } else {
+                        stopSelf()
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Cannot restart foreground service from background, stopping", e)
+                    Log.w(TAG, "Cannot restart from background, stopping", e)
                     stopSelf()
                 }
             }
@@ -131,166 +133,172 @@ class TransportService : Service() {
     }
 
     override fun onDestroy() {
-        stopTransport()
-        serviceScope.cancel()
+        pollingFuture?.cancel(false)
+        executor.shutdown()
+        releaseWakeLock()
         super.onDestroy()
     }
 
-    private fun startTransportFromPrefs() {
-        serviceScope.launch {
-            val transportEnabled = prefs.transportEnabled.first()
-            val shareInstance = prefs.shareInstance.first()
-            val sharedInstancePort = prefs.sharedInstancePort.first()
-            val instanceControlPort = prefs.instanceControlPort.first()
-            val interfacesJson = prefs.interfacesJson.first()
-            val interfaces = InterfaceConfig.fromJson(interfacesJson)
-            val publishBlackhole = prefs.publishBlackhole.first()
-            val blackholeSources = prefs.blackholeSources.first()
-            startTransport(
-                transportEnabled = transportEnabled,
-                shareInstance = shareInstance,
-                sharedInstancePort = sharedInstancePort,
-                instanceControlPort = instanceControlPort,
-                interfaces = interfaces,
-                publishBlackhole = publishBlackhole,
-                blackholeSources = blackholeSources,
-            )
-        }
-    }
+    // --- Work executed on the single-thread executor ---
 
-    fun startTransport(
-        transportEnabled: Boolean,
-        shareInstance: Boolean = true,
-        sharedInstancePort: Int = 0,
-        instanceControlPort: Int = 0,
-        interfaces: List<InterfaceConfig>,
-        publishBlackhole: Boolean = false,
-        blackholeSources: String = "",
-    ) {
-        if (_serviceState.value is ServiceState.Running || _serviceState.value is ServiceState.Starting ||
-            _serviceState.value is ServiceState.Stopping
-        ) return
+    private fun doStart(configJson: String) {
+        try {
+            val json = JSONObject(configJson)
+            val configIni = json.getString("configIni")
+            val rnodeConfigs = parseRnodeConfigs(json.optJSONArray("rnodeInterfaces"))
 
-        _serviceState.value = ServiceState.Starting
-        acquireWakeLock()
+            // Save for START_STICKY recovery
+            saveSavedConfig(configJson)
 
-        serviceScope.launch(Dispatchers.IO) {
-            try {
-                val storagePath = filesDir.absolutePath
-                val b = ReticulumBinding(storagePath, this@TransportService)
-                b.initialize(
-                    transportEnabled = transportEnabled,
-                    shareInstance = shareInstance,
-                    sharedInstancePort = sharedInstancePort,
-                    instanceControlPort = instanceControlPort,
-                    interfaces = interfaces,
-                    publishBlackhole = publishBlackhole,
-                    blackholeSources = blackholeSources,
-                )
-                binding = b
+            val b = ReticulumBinding(filesDir.absolutePath, this)
+            b.initialize(configIni, rnodeConfigs)
+            binding = b
 
-                _transportIdentity.value = b.getTransportIdentityHash()
-                _isConnectedToSharedInstance.value = b.isConnectedToSharedInstance()
-                _serviceState.value = ServiceState.Running
+            currentState = "running"
+            currentError = null
+            updateNotification("Running")
+            startPolling()
+            pollAndBroadcast()
 
-                updateNotification("Running")
-                startStatsPolling()
-
-                Log.i(TAG, "Transport started successfully")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to start transport", e)
-                val message = friendlyErrorMessage(e)
-                _serviceState.value = ServiceState.Error(message)
-                updateNotification("Error: $message")
-                releaseWakeLock()
-            }
-        }
-    }
-
-    fun stopTransport() {
-        if (_serviceState.value is ServiceState.Stopping || _serviceState.value is ServiceState.Stopped) return
-
-        statsJob?.cancel()
-        statsJob = null
-        _serviceState.value = ServiceState.Stopping
-
-        serviceScope.launch(Dispatchers.IO) {
-            try {
-                binding?.shutdown()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error during shutdown", e)
-            }
-            binding = null
-            _interfaceStats.value = emptyList()
-            _pathTable.value = emptyList()
-            _announceTable.value = emptyList()
-            _discoveredInterfaces.value = emptyList()
-            _discoveryEnabled.value = false
-            _isConnectedToSharedInstance.value = false
-            _transportIdentity.value = null
-            _serviceState.value = ServiceState.Stopped
+            Log.i(TAG, "Transport started successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start transport", e)
+            currentState = "error"
+            currentError = friendlyErrorMessage(e)
+            updateNotification("Error: $currentError")
             releaseWakeLock()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        }
-    }
-
-    fun enableDiscovery() {
-        val b = binding ?: return
-        serviceScope.launch(Dispatchers.IO) {
-            val success = b.enableDiscovery()
-            _discoveryEnabled.value = success
-            if (success) {
-                Log.i(TAG, "Interface discovery enabled")
-            } else {
-                Log.w(TAG, "Failed to enable interface discovery")
-            }
-        }
-    }
-
-    fun refreshDiscoveredInterfaces() {
-        val b = binding ?: return
-        serviceScope.launch(Dispatchers.IO) {
-            _discoveredInterfaces.value = b.getDiscoveredInterfaces()
-        }
-    }
-
-    private fun startStatsPolling() {
-        statsJob?.cancel()
-        statsJob = serviceScope.launch(Dispatchers.IO) {
-            while (true) {
-                delay(STATS_POLL_INTERVAL_MS)
-                val b = binding ?: break
-                try {
-                    _interfaceStats.value = b.getInterfaceStats()
-                    _pathTable.value = b.getPathTable()
-                    _announceTable.value = b.getAnnounceTable()
-                    if (_discoveryEnabled.value) {
-                        _discoveredInterfaces.value = b.getDiscoveredInterfaces()
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error polling stats", e)
-                }
-            }
-        }
-    }
-
-    private fun acquireWakeLock() {
-        if (wakeLock == null) {
-            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = pm.newWakeLock(
-                PowerManager.PARTIAL_WAKE_LOCK,
-                "ReticulumTransport::TransportWakeLock",
+            updateAndBroadcast(
+                ServiceSnapshot(state = "error", error = currentError),
             )
         }
-        wakeLock?.acquire()
     }
 
-    private fun releaseWakeLock() {
-        wakeLock?.let {
-            if (it.isHeld) it.release()
+    private fun doStop() {
+        pollingFuture?.cancel(false)
+        pollingFuture = null
+
+        // Delete saved config so START_STICKY doesn't auto-restart
+        deleteSavedConfig()
+
+        try {
+            binding?.shutdown()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during shutdown", e)
         }
-        wakeLock = null
+        binding = null
+        releaseWakeLock()
+
+        Log.i(TAG, "Transport stopped, exiting process")
+        System.exit(0)
     }
+
+    private fun doEnableDiscovery() {
+        val b = binding ?: return
+        val success = b.enableDiscovery()
+        discoveryEnabled = success
+        if (success) {
+            Log.i(TAG, "Interface discovery enabled")
+            pollAndBroadcast()
+        }
+    }
+
+    private fun startPolling() {
+        pollingFuture?.cancel(false)
+        pollingFuture = executor.scheduleAtFixedRate({
+            try {
+                pollAndBroadcast()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error during stats poll", e)
+            }
+        }, STATS_POLL_INTERVAL_MS, STATS_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS)
+    }
+
+    private fun pollAndBroadcast() {
+        val b = binding
+        val snapshot = ServiceSnapshot(
+            state = currentState,
+            error = currentError,
+            identity = b?.getTransportIdentityHash(),
+            connectedToSharedInstance = b?.isConnectedToSharedInstance() ?: false,
+            interfaces = b?.getInterfaceStats() ?: emptyList(),
+            pathTable = b?.getPathTable() ?: emptyList(),
+            announceQueue = b?.getAnnounceTable() ?: emptyList(),
+            discoveredInterfaces = if (discoveryEnabled) {
+                b?.getDiscoveredInterfaces() ?: emptyList()
+            } else {
+                emptyList()
+            },
+            discoveryEnabled = discoveryEnabled,
+        )
+        updateAndBroadcast(snapshot)
+    }
+
+    private fun updateAndBroadcast(snapshot: ServiceSnapshot) {
+        val json = snapshot.toJson()
+        cachedSnapshot = json
+        val cb = callback
+        if (cb != null) {
+            try {
+                cb.onUpdate(json)
+            } catch (e: Exception) {
+                Log.w(TAG, "Callback dead, removing", e)
+                callback = null
+            }
+        }
+    }
+
+    // --- Config persistence for START_STICKY ---
+
+    private fun saveSavedConfig(json: String) {
+        try {
+            File(filesDir, SAVED_CONFIG_FILE).writeText(json)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to save config", e)
+        }
+    }
+
+    private fun readSavedConfig(): String? {
+        return try {
+            val f = File(filesDir, SAVED_CONFIG_FILE)
+            if (f.exists()) f.readText() else null
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to read saved config", e)
+            null
+        }
+    }
+
+    private fun deleteSavedConfig() {
+        try {
+            File(filesDir, SAVED_CONFIG_FILE).delete()
+        } catch (_: Exception) {}
+    }
+
+    // --- RNode config JSON parsing ---
+
+    private fun parseRnodeConfigs(arr: JSONArray?): List<InterfaceConfig.RNodeInterface> {
+        if (arr == null) return emptyList()
+        return (0 until arr.length()).mapNotNull { i ->
+            try {
+                val o = arr.getJSONObject(i)
+                InterfaceConfig.RNodeInterface(
+                    name = o.getString("name"),
+                    enabled = true,
+                    connectionMode = o.optString("connectionMode", "ble"),
+                    targetDevice = o.optString("targetDevice", ""),
+                    frequency = o.optLong("frequency", 0),
+                    bandwidth = o.optInt("bandwidth", 0),
+                    spreadingFactor = o.optInt("spreadingFactor", 0),
+                    codingRate = o.optInt("codingRate", 0),
+                    txPower = o.optInt("txPower", 0),
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to parse RNode config", e)
+                null
+            }
+        }
+    }
+
+    // --- Notification ---
 
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
@@ -330,6 +338,33 @@ class TransportService : Service() {
             .build()
     }
 
+    private fun updateNotification(status: String) {
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.notify(NOTIFICATION_ID, createNotification(status))
+    }
+
+    // --- Wake lock ---
+
+    private fun acquireWakeLock() {
+        if (wakeLock == null) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "ReticulumTransport::TransportWakeLock",
+            )
+        }
+        wakeLock?.acquire()
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let {
+            if (it.isHeld) it.release()
+        }
+        wakeLock = null
+    }
+
+    // --- Error formatting ---
+
     private fun friendlyErrorMessage(e: Exception): String {
         val msg = e.message ?: e.cause?.message ?: ""
         return when {
@@ -345,11 +380,6 @@ class TransportService : Service() {
                 "Network is unreachable. Check your connection and try again."
             else -> msg.ifBlank { "Unknown error" }
         }
-    }
-
-    private fun updateNotification(status: String) {
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.notify(NOTIFICATION_ID, createNotification(status))
     }
 }
 

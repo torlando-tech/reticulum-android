@@ -6,14 +6,21 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import org.json.JSONArray
+import org.json.JSONObject
+import tech.torlando.rns.binding.ConfigGenerator
 import tech.torlando.rns.data.AnnounceEntry
 import tech.torlando.rns.data.DiscoveredInterface
 import tech.torlando.rns.data.InterfaceConfig
 import tech.torlando.rns.data.InterfaceStats
 import tech.torlando.rns.data.PathEntry
 import tech.torlando.rns.data.PreferencesManager
+import tech.torlando.rns.service.IRnsCallback
+import tech.torlando.rns.service.IRnsService
+import tech.torlando.rns.service.ServiceSnapshot
 import tech.torlando.rns.service.ServiceState
 import tech.torlando.rns.service.TransportService
 import tech.torlando.rns.stats.data.HistoryBuffer
@@ -25,13 +32,17 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import org.json.JSONArray
-import org.json.JSONObject
 
 class TransportViewModel(application: Application) : AndroidViewModel(application) {
 
+    companion object {
+        private const val TAG = "TransportViewModel"
+    }
+
     private val prefs = PreferencesManager(application)
-    private var service: TransportService? = null
+    private var rnsService: IRnsService? = null
+    private var pendingConfigJson: String? = null
+    private var pendingRestartAfterDisconnect = false
 
     private val _serviceState = MutableStateFlow<ServiceState>(ServiceState.Stopped)
     val serviceState: StateFlow<ServiceState> = _serviceState.asStateFlow()
@@ -92,50 +103,56 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope, SharingStarted.Eagerly, "",
     )
 
+    private val rnsCallback = object : IRnsCallback.Stub() {
+        override fun onUpdate(json: String?) {
+            if (json == null) return
+            try {
+                val snapshot = ServiceSnapshot.fromJson(json)
+                applySnapshot(snapshot)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to parse snapshot", e)
+            }
+        }
+    }
+
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            val svc = (binder as TransportService.LocalBinder).service
-            service = svc
+            val svc = IRnsService.Stub.asInterface(binder)
+            rnsService = svc
 
-            viewModelScope.launch {
-                svc.serviceState.collect { _serviceState.value = it }
+            try {
+                svc.registerCallback(rnsCallback)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to register callback", e)
             }
-            viewModelScope.launch {
-                svc.interfaceStats.collect { stats ->
-                    _interfaceStats.value = stats
-                    recordHistory(stats)
+
+            // If there's a pending start, send it now
+            pendingConfigJson?.let { config ->
+                pendingConfigJson = null
+                try {
+                    svc.start(config)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to call start on service", e)
                 }
-            }
-            viewModelScope.launch {
-                svc.pathTable.collect { _pathTable.value = it }
-            }
-            viewModelScope.launch {
-                svc.announceTable.collect { _announceTable.value = it }
-            }
-            viewModelScope.launch {
-                svc.transportIdentity.collect { _transportIdentity.value = it }
-            }
-            viewModelScope.launch {
-                svc.discoveredInterfaces.collect { _discoveredInterfaces.value = it }
-            }
-            viewModelScope.launch {
-                svc.discoveryEnabled.collect { _discoveryEnabled.value = it }
-            }
-            viewModelScope.launch {
-                svc.isConnectedToSharedInstance.collect { _isConnectedToSharedInstance.value = it }
             }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
-            service = null
-            _serviceState.value = ServiceState.Stopped
+            rnsService = null
+            clearState()
+
+            if (pendingRestartAfterDisconnect) {
+                pendingRestartAfterDisconnect = false
+                startService()
+            } else {
+                // Auto-rebind to catch system-restarted service
+                rebind()
+            }
         }
     }
 
     init {
-        val ctx = getApplication<Application>()
-        val intent = Intent(ctx, TransportService::class.java)
-        ctx.bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        rebind()
 
         viewModelScope.launch {
             prefs.interfacesJson.collect { json ->
@@ -146,6 +163,9 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
 
     override fun onCleared() {
         try {
+            rnsService?.unregisterCallback(rnsCallback)
+        } catch (_: Exception) {}
+        try {
             getApplication<Application>().unbindService(connection)
         } catch (_: Exception) {}
         super.onCleared()
@@ -153,33 +173,59 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun startService() {
         _pendingRestart.value = false
-        val ctx = getApplication<Application>()
-        val intent = Intent(ctx, TransportService::class.java).apply {
-            action = TransportService.ACTION_START
+
+        viewModelScope.launch {
+            val configJson = buildConfigJson()
+
+            val ctx = getApplication<Application>()
+            val intent = Intent(ctx, TransportService::class.java).apply {
+                action = TransportService.ACTION_START
+            }
+            ctx.startForegroundService(intent)
+
+            val svc = rnsService
+            if (svc != null) {
+                try {
+                    svc.start(configJson)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to call start", e)
+                }
+            } else {
+                // Not yet bound — save config for onServiceConnected
+                pendingConfigJson = configJson
+                rebind()
+            }
         }
-        ctx.startForegroundService(intent)
-        ctx.bindService(intent, connection, Context.BIND_AUTO_CREATE)
     }
 
     fun stopService() {
-        val svc = service ?: return
-        svc.stopTransport()
-        viewModelScope.launch {
-            svc.serviceState.first { it is ServiceState.Stopped }
-            val ctx = getApplication<Application>()
-            ctx.stopService(Intent(ctx, TransportService::class.java))
-        }
+        try {
+            rnsService?.stop()
+        } catch (_: Exception) {}
+        // Process dies → onServiceDisconnected fires → state clears
     }
 
     fun restartService() {
         _pendingRestart.value = false
-        val svc = service ?: return
-        svc.stopTransport()
-        viewModelScope.launch {
-            svc.serviceState.first { it is ServiceState.Stopped }
-            startService()
-        }
+        pendingRestartAfterDisconnect = true
+        try {
+            rnsService?.stop()
+        } catch (_: Exception) {}
+        // Process dies → onServiceDisconnected → startService()
     }
+
+    fun enableDiscovery() {
+        try {
+            rnsService?.enableDiscovery()
+        } catch (_: Exception) {}
+    }
+
+    fun refreshDiscoveredInterfaces() {
+        // Discovered interfaces are refreshed automatically during polling.
+        // This is a no-op now but kept for API compatibility.
+    }
+
+    // --- Interface config management (local prefs, doesn't cross AIDL) ---
 
     fun addInterface(config: InterfaceConfig) {
         viewModelScope.launch {
@@ -226,18 +272,7 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
         updateInterface(index, config.withEnabled(!config.enabled))
     }
 
-    private fun recordHistory(stats: List<InterfaceStats>) {
-        val now = System.currentTimeMillis()
-        val activeNames = mutableSetOf<String>()
-        for (stat in stats) {
-            activeNames.add(stat.name)
-            val buffer = historyBuffers.getOrPut(stat.name) { HistoryBuffer() }
-            buffer.add(InterfaceHistoryPoint(timestamp = now, rxBytes = stat.rxb, txBytes = stat.txb))
-        }
-        // Clean up buffers for interfaces that no longer exist
-        historyBuffers.keys.removeAll { it !in activeNames }
-        _interfaceHistory.value = historyBuffers.mapValues { it.value.toList() }
-    }
+    // --- Settings ---
 
     fun setTransportEnabled(enabled: Boolean) {
         viewModelScope.launch { prefs.setTransportEnabled(enabled) }
@@ -263,12 +298,103 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch { prefs.setBlackholeSources(sources) }
     }
 
-    fun enableDiscovery() {
-        service?.enableDiscovery()
+    // --- Private helpers ---
+
+    private fun applySnapshot(snapshot: ServiceSnapshot) {
+        _serviceState.value = when (snapshot.state) {
+            "running" -> ServiceState.Running
+            "starting" -> ServiceState.Starting
+            "stopping" -> ServiceState.Stopping
+            "error" -> ServiceState.Error(snapshot.error ?: "Unknown error")
+            else -> ServiceState.Stopped
+        }
+        _transportIdentity.value = snapshot.identity
+        _isConnectedToSharedInstance.value = snapshot.connectedToSharedInstance
+        _interfaceStats.value = snapshot.interfaces
+        _pathTable.value = snapshot.pathTable
+        _announceTable.value = snapshot.announceQueue
+        _discoveredInterfaces.value = snapshot.discoveredInterfaces
+        _discoveryEnabled.value = snapshot.discoveryEnabled
+
+        if (snapshot.interfaces.isNotEmpty()) {
+            recordHistory(snapshot.interfaces)
+        }
     }
 
-    fun refreshDiscoveredInterfaces() {
-        service?.refreshDiscoveredInterfaces()
+    private fun clearState() {
+        _serviceState.value = ServiceState.Stopped
+        _interfaceStats.value = emptyList()
+        _pathTable.value = emptyList()
+        _announceTable.value = emptyList()
+        _discoveredInterfaces.value = emptyList()
+        _discoveryEnabled.value = false
+        _isConnectedToSharedInstance.value = false
+        _transportIdentity.value = null
+    }
+
+    private fun rebind() {
+        val ctx = getApplication<Application>()
+        try {
+            ctx.bindService(
+                Intent(ctx, TransportService::class.java),
+                connection,
+                Context.BIND_AUTO_CREATE,
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to bind to service", e)
+        }
+    }
+
+    private suspend fun buildConfigJson(): String {
+        val transportEnabled = prefs.transportEnabled.first()
+        val shareInstance = prefs.shareInstance.first()
+        val sharedInstancePort = prefs.sharedInstancePort.first()
+        val instanceControlPort = prefs.instanceControlPort.first()
+        val interfacesJson = prefs.interfacesJson.first()
+        val allInterfaces = InterfaceConfig.fromJson(interfacesJson)
+        val publishBlackhole = prefs.publishBlackhole.first()
+        val blackholeSources = prefs.blackholeSources.first()
+
+        val configIni = ConfigGenerator.generate(
+            interfaces = allInterfaces,
+            transportEnabled = transportEnabled,
+            shareInstance = shareInstance,
+            sharedInstancePort = sharedInstancePort,
+            instanceControlPort = instanceControlPort,
+            publishBlackhole = publishBlackhole,
+            blackholeSources = blackholeSources,
+        )
+
+        val rnodeArr = JSONArray()
+        for (rc in allInterfaces.filterIsInstance<InterfaceConfig.RNodeInterface>().filter { it.enabled }) {
+            rnodeArr.put(JSONObject().apply {
+                put("name", rc.name)
+                put("connectionMode", rc.connectionMode)
+                put("targetDevice", rc.targetDevice)
+                put("frequency", rc.frequency)
+                put("bandwidth", rc.bandwidth)
+                put("spreadingFactor", rc.spreadingFactor)
+                put("codingRate", rc.codingRate)
+                put("txPower", rc.txPower)
+            })
+        }
+
+        return JSONObject().apply {
+            put("configIni", configIni)
+            put("rnodeInterfaces", rnodeArr)
+        }.toString()
+    }
+
+    private fun recordHistory(stats: List<InterfaceStats>) {
+        val now = System.currentTimeMillis()
+        val activeNames = mutableSetOf<String>()
+        for (stat in stats) {
+            activeNames.add(stat.name)
+            val buffer = historyBuffers.getOrPut(stat.name) { HistoryBuffer() }
+            buffer.add(InterfaceHistoryPoint(timestamp = now, rxBytes = stat.rxb, txBytes = stat.txb))
+        }
+        historyBuffers.keys.removeAll { it !in activeNames }
+        _interfaceHistory.value = historyBuffers.mapValues { it.value.toList() }
     }
 
     private fun serializeInterfaces(interfaces: List<InterfaceConfig>): String {
@@ -328,5 +454,4 @@ class TransportViewModel(application: Application) : AndroidViewModel(applicatio
         }
         return arr.toString()
     }
-
 }

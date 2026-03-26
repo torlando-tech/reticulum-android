@@ -1,14 +1,13 @@
 """
 Helper for managing RNS lifecycle on Android.
 
-Handles two issues that prevent clean restart:
-1. signal.signal() fails from non-main threads (Android calls from coroutines)
-2. RNS uses class-level singletons/state that aren't cleared by exit_handler()
+Runs in a separate process (:rns). Process death is the cleanup
+mechanism — no need for complex port-waiting or singleton reset.
 """
 
 import os
 import signal
-# Patch signal before RNS imports it
+# Patch signal before RNS imports it (signal.signal() fails from non-main threads)
 signal.signal = lambda *a, **kw: None
 
 # Patch os._exit to raise SystemExit instead of hard-killing the process.
@@ -20,9 +19,6 @@ def _safe_exit(code=0):
 os._exit = _safe_exit
 
 import RNS
-import sys
-import socket
-import time
 
 # Disable epoll backend for RNS interfaces. The BackboneInterface epoll job
 # thread runs `while True` as a daemon and cannot be cleanly stopped for
@@ -37,6 +33,7 @@ _rnode_interfaces = []
 
 def _get_classes():
     """Get the actual Reticulum and Transport classes via every known path."""
+    import sys
     ret_classes = set()
     trn_classes = set()
 
@@ -62,66 +59,6 @@ def _get_classes():
             trn_classes.add(obj)
 
     return ret_classes, trn_classes
-
-
-def _reset_all():
-    """Reset all RNS singleton state."""
-    ret_classes, trn_classes = _get_classes()
-
-    # Reset Reticulum singleton
-    for cls in ret_classes:
-        try: cls._Reticulum__instance = None
-        except Exception: pass
-        try: cls._Reticulum__exit_handler_ran = False
-        except Exception: pass
-        try: cls._Reticulum__interface_detach_ran = False
-        except Exception: pass
-
-    # Reset Transport state
-    transport_lists = [
-        "interfaces", "destinations", "pending_links", "active_links",
-        "receipts", "announce_handlers", "discovery_pr_tags",
-        "control_destinations", "control_hashes", "mgmt_destinations",
-        "mgmt_hashes", "remote_management_allowed", "local_client_interfaces",
-        "local_client_rssi_cache", "local_client_snr_cache",
-        "local_client_q_cache",
-    ]
-    transport_dicts = [
-        "announce_table", "path_table", "reverse_table", "link_table",
-        "held_announces", "tunnels", "announce_rate_table", "path_requests",
-        "path_states", "discovery_path_requests", "pending_local_path_requests",
-        "blackholed_identities",
-    ]
-    transport_sets = ["packet_hashlist", "packet_hashlist_prev"]
-
-    for T in trn_classes:
-        for attr in transport_lists:
-            try: setattr(T, attr, [])
-            except Exception: pass
-        for attr in transport_dicts:
-            try: setattr(T, attr, {})
-            except Exception: pass
-        for attr in transport_sets:
-            try: setattr(T, attr, set())
-            except Exception: pass
-        try: T.identity = None
-        except Exception: pass
-        try: T.owner = None
-        except Exception: pass
-        try: T.start_time = None
-        except Exception: pass
-        try: T.jobs_locked = False
-        except Exception: pass
-        try: T.jobs_running = False
-        except Exception: pass
-        try: T.links_last_checked = 0.0
-        except Exception: pass
-        try: T.receipts_last_checked = 0.0
-        except Exception: pass
-        try: T.announces_last_checked = 0.0
-        except Exception: pass
-        try: T.pending_prs_last_checked = 0.0
-        except Exception: pass
 
 
 def set_rnode_bridge(bridge):
@@ -215,70 +152,24 @@ def list_discovered():
         return []
 
 
-def _shutdown_instance(instance):
-    """Full teardown of an RNS instance."""
-    # 1. Run exit_handler first — detaches all interfaces (with thread joins),
-    #    saves state. This also detaches the LocalServerInterface (no-op) and
-    #    LocalClientInterface (closes client sockets).
-    try:
-        type(instance).exit_handler()
-    except Exception:
-        pass
-
-    # 2. Now shut down the ThreadingTCPServer. We do this AFTER exit_handler
-    #    so all client connections are detached first — otherwise detach threads
-    #    might reconnect to the server during shutdown.
-    si = getattr(instance, 'shared_instance_interface', None)
-    if si is not None:
-        server = getattr(si, 'server', None)
-        if server is not None:
-            try:
-                server.shutdown()
-                server.server_close()
-            except Exception:
-                pass
-
-    # 3. Wait for the port to be actually free.
-    port = getattr(instance, 'local_interface_port', 37428)
-    _wait_for_port_free("127.0.0.1", port)
-
-    _reset_all()
-
-
-def _wait_for_port_free(host, port, timeout=5.0):
-    """Block until nothing is listening on host:port."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(0.5)
-            s.connect((host, port))
-            s.close()
-            # Connection succeeded — something is still listening
-            time.sleep(0.1)
-        except (ConnectionRefusedError, OSError):
-            # Connection refused — port is free
-            return
-    # Timed out, proceed anyway
-
-
 def start(config_path):
     """Initialize RNS."""
-    _reset_all()
     return RNS.Reticulum(config_path)
 
 
 def stop():
-    """Shut down RNS and reset singleton state for restart."""
-    # 1. Destroy RNode interfaces (managed outside RNS Transport)
+    """Shut down RNS. Process exit handles final cleanup."""
+    # Destroy RNode interfaces (managed outside RNS Transport)
     destroy_rnode_interfaces()
 
-    # 2. Full teardown: exit_handler + TCPServer shutdown + port wait + reset
+    # Run exit_handler to detach interfaces and save state
     ret_classes, _ = _get_classes()
     for cls in ret_classes:
         instance = getattr(cls, "_Reticulum__instance", None)
         if instance is not None:
-            _shutdown_instance(instance)
-            return
-    # No instance found, just reset state
-    _reset_all()
+            try:
+                type(instance).exit_handler()
+            except Exception:
+                pass
+            break
+    # Process death (System.exit) handles the rest — no port waiting or reset needed

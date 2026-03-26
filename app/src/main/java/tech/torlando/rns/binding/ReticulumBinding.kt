@@ -26,29 +26,14 @@ class ReticulumBinding(private val storagePath: String, private val context: Con
         get() = reticulum != null
 
     fun initialize(
-        transportEnabled: Boolean,
-        shareInstance: Boolean = true,
-        sharedInstancePort: Int = 0,
-        instanceControlPort: Int = 0,
-        interfaces: List<InterfaceConfig>,
-        publishBlackhole: Boolean = false,
-        blackholeSources: String = "",
+        configIni: String,
+        rnodeConfigs: List<InterfaceConfig.RNodeInterface> = emptyList(),
     ) {
         val configDir = File(storagePath, "reticulum")
         configDir.mkdirs()
 
         val configFile = File(configDir, "config")
-        configFile.writeText(
-            ConfigGenerator.generate(
-                interfaces = interfaces,
-                transportEnabled = transportEnabled,
-                shareInstance = shareInstance,
-                sharedInstancePort = sharedInstancePort,
-                instanceControlPort = instanceControlPort,
-                publishBlackhole = publishBlackhole,
-                blackholeSources = blackholeSources,
-            ),
-        )
+        configFile.writeText(configIni)
 
         Log.i(TAG, "Initializing RNS with config: ${configFile.absolutePath}")
         Log.d(TAG, "Config contents:\n${configFile.readText()}")
@@ -57,10 +42,6 @@ class ReticulumBinding(private val storagePath: String, private val context: Con
         reticulum = helper.callAttr("start", configDir.absolutePath)
         Log.i(TAG, "RNS initialized successfully")
 
-        // Set up RNode bridges and create interfaces for any RNode configs
-        val rnodeConfigs = interfaces.filterIsInstance<InterfaceConfig.RNodeInterface>()
-            .filter { it.enabled }
-        Log.i(TAG, "Found ${rnodeConfigs.size} enabled RNode configs out of ${interfaces.size} total interfaces")
         if (rnodeConfigs.isNotEmpty()) {
             setupRNodeBridges(helper, rnodeConfigs)
         }
