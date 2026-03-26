@@ -61,6 +61,18 @@ def _get_classes():
     return ret_classes, trn_classes
 
 
+def _reset_all():
+    """Reset RNS singleton state so Reticulum can be re-initialized."""
+    ret_classes, _ = _get_classes()
+    for cls in ret_classes:
+        try: cls._Reticulum__instance = None
+        except Exception: pass
+        try: cls._Reticulum__exit_handler_ran = False
+        except Exception: pass
+        try: cls._Reticulum__interface_detach_ran = False
+        except Exception: pass
+
+
 def set_rnode_bridge(bridge):
     """Set the KotlinRNodeBridge instance for Python RNode interfaces."""
     import rnode_interface
@@ -153,7 +165,8 @@ def list_discovered():
 
 
 def start(config_path):
-    """Initialize RNS."""
+    """Initialize RNS. Reset singleton first in case of stale state."""
+    _reset_all()
     return RNS.Reticulum(config_path)
 
 

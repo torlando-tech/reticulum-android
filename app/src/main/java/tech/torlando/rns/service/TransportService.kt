@@ -52,11 +52,6 @@ class TransportService : Service() {
     private val binder = object : IRnsService.Stub() {
         override fun start(configJson: String?) {
             if (configJson == null) return
-            if (currentState == "running" || currentState == "starting") return
-            currentState = "starting"
-            currentError = null
-            updateAndBroadcast(ServiceSnapshot(state = "starting"))
-            acquireWakeLock()
             executor.execute { doStart(configJson) }
         }
 
@@ -115,10 +110,7 @@ class TransportService : Service() {
                         ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
                     )
                     val savedConfig = readSavedConfig()
-                    if (savedConfig != null && currentState == "stopped") {
-                        currentState = "starting"
-                        updateAndBroadcast(ServiceSnapshot(state = "starting"))
-                        acquireWakeLock()
+                    if (savedConfig != null) {
                         executor.execute { doStart(savedConfig) }
                     } else {
                         stopSelf()
@@ -142,6 +134,12 @@ class TransportService : Service() {
     // --- Work executed on the single-thread executor ---
 
     private fun doStart(configJson: String) {
+        if (currentState == "running" || currentState == "starting") return
+        currentState = "starting"
+        currentError = null
+        updateAndBroadcast(ServiceSnapshot(state = "starting"))
+        acquireWakeLock()
+
         try {
             val json = JSONObject(configJson)
             val configIni = json.getString("configIni")
