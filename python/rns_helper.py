@@ -24,6 +24,13 @@ import sys
 import socket
 import time
 
+# Disable epoll backend for RNS interfaces. The BackboneInterface epoll job
+# thread runs `while True` as a daemon and cannot be cleanly stopped for
+# in-process restart — its sockets survive shutdown and block port rebinding.
+# The ThreadingTCPServer/threading fallback supports deterministic shutdown.
+import RNS.vendor.platformutils as _pu
+_pu.use_epoll = lambda: False
+
 # Active RNode interfaces created via create_rnode_interface()
 _rnode_interfaces = []
 
@@ -208,102 +215,70 @@ def list_discovered():
         return []
 
 
-def start(config_path, retries=3, delay=2.0):
-    """Initialize RNS. Retries on EADDRINUSE or unwanted shared-instance fallback."""
-    last_error = None
-    for attempt in range(retries):
-        _reset_all()
+def _shutdown_instance(instance):
+    """Full teardown of an RNS instance."""
+    # 1. Run exit_handler first — detaches all interfaces (with thread joins),
+    #    saves state. This also detaches the LocalServerInterface (no-op) and
+    #    LocalClientInterface (closes client sockets).
+    try:
+        type(instance).exit_handler()
+    except Exception:
+        pass
+
+    # 2. Now shut down the ThreadingTCPServer. We do this AFTER exit_handler
+    #    so all client connections are detached first — otherwise detach threads
+    #    might reconnect to the server during shutdown.
+    si = getattr(instance, 'shared_instance_interface', None)
+    if si is not None:
+        server = getattr(si, 'server', None)
+        if server is not None:
+            try:
+                server.shutdown()
+                server.server_close()
+            except Exception:
+                pass
+
+    # 3. Wait for the port to be actually free.
+    port = getattr(instance, 'local_interface_port', 37428)
+    _wait_for_port_free("127.0.0.1", port)
+
+    _reset_all()
+
+
+def _wait_for_port_free(host, port, timeout=5.0):
+    """Block until nothing is listening on host:port."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
         try:
-            instance = RNS.Reticulum(config_path)
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.5)
+            s.connect((host, port))
+            s.close()
+            # Connection succeeded — something is still listening
+            time.sleep(0.1)
+        except (ConnectionRefusedError, OSError):
+            # Connection refused — port is free
+            return
+    # Timed out, proceed anyway
 
-            # Detect unwanted shared-instance-client fallback. This happens
-            # when the old instance's TCP socket is still in TIME_WAIT and
-            # RNS silently connects as a client instead of binding as owner.
-            if getattr(instance, "is_connected_to_shared_instance", False):
-                RNS.log("Started as shared instance client unexpectedly, retrying...", RNS.LOG_WARNING)
-                try:
-                    cls_exit = type(instance)
-                    cls_exit.exit_handler()
-                except Exception:
-                    pass
-                _reset_all()
-                if attempt < retries - 1:
-                    time.sleep(delay)
-                    continue
-                # Last attempt — return what we got
-                RNS.log("Could not become shared instance owner after retries", RNS.LOG_WARNING)
-            return instance
 
-        except BaseException as e:
-            last_error = e
-            # Unwrap SystemExit to get at the original error context
-            if isinstance(e, SystemExit):
-                last_error = OSError(
-                    "RNS exited during initialization (likely a port conflict or config error)"
-                )
-            is_addr_in_use = (
-                (isinstance(e, OSError) and getattr(e, 'errno', None) == 98) or
-                (isinstance(e, SystemExit)) or
-                ("Address already in use" in str(e))
-            )
-            if not is_addr_in_use and attempt >= retries - 1:
-                raise last_error from e if last_error is not e else e
-            if attempt < retries - 1:
-                if is_addr_in_use:
-                    time.sleep(delay)
-                continue
-            if is_addr_in_use:
-                raise OSError(
-                    "EADDRINUSE: Port already in use after %d attempts. "
-                    "Another Reticulum instance may be running." % retries
-                ) from e
-            raise last_error from e if last_error is not e else e
+def start(config_path):
+    """Initialize RNS."""
+    _reset_all()
+    return RNS.Reticulum(config_path)
 
 
 def stop():
-    """Shut down RNS and reset singleton state for restart.
-
-    Uses the official exit_handler() which properly detaches all interfaces
-    (joining detach threads), saves state, etc. We add:
-    - RNode cleanup (managed outside RNS Transport)
-    - ThreadingTCPServer shutdown (not handled by exit_handler for TCP mode)
-    - Singleton reset (so Reticulum() can be called again in-process)
-    """
+    """Shut down RNS and reset singleton state for restart."""
     # 1. Destroy RNode interfaces (managed outside RNS Transport)
     destroy_rnode_interfaces()
 
-    # 2. Shut down the shared instance ThreadingTCPServer if present.
-    #    RNS exit_handler() calls detach_interfaces() which handles the epoll
-    #    backend via deregister_listeners(), but the non-epoll ThreadingTCPServer
-    #    path has a no-op detach(). We must shut it down explicitly or it holds
-    #    the port and the next start() falls back to client mode.
-    try:
-        _, trn_classes = _get_classes()
-        for T in trn_classes:
-            for iface in list(getattr(T, 'interfaces', [])):
-                server = getattr(iface, 'server', None)
-                if server is not None:
-                    try:
-                        server.shutdown()
-                        server.server_close()
-                    except Exception:
-                        pass
-    except Exception:
-        pass
-
-    # 3. Run the official exit handler — detaches all interfaces
-    #    (joining detach threads), saves path table, etc.
-    try:
-        ret_classes, _ = _get_classes()
-        for cls in ret_classes:
-            if getattr(cls, "_Reticulum__instance", None) is not None:
-                try:
-                    cls.exit_handler()
-                except Exception:
-                    pass
-                break
-    except Exception:
-        pass
-
-    # 4. Reset singleton state so Reticulum() can be called again
+    # 2. Full teardown: exit_handler + TCPServer shutdown + port wait + reset
+    ret_classes, _ = _get_classes()
+    for cls in ret_classes:
+        instance = getattr(cls, "_Reticulum__instance", None)
+        if instance is not None:
+            _shutdown_instance(instance)
+            return
+    # No instance found, just reset state
     _reset_all()

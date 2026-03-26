@@ -169,6 +169,16 @@ fun InterfacesScreen(
             ) {
                 item { Spacer(Modifier.height(8.dp)) }
 
+                // Service status card (starting/stopping/error)
+                if (serviceState is ServiceState.Starting ||
+                    serviceState is ServiceState.Stopping ||
+                    serviceState is ServiceState.Error
+                ) {
+                    item {
+                        StatusCard(serviceState)
+                    }
+                }
+
                 // Shared instance info banner
                 if (isRunning && isConnectedToSharedInstance) {
                     item {

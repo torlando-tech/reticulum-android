@@ -169,7 +169,7 @@ fun HomeScreen(viewModel: TransportViewModel) {
 }
 
 @Composable
-private fun StatusCard(state: ServiceState) {
+fun StatusCard(state: ServiceState) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
