@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="scripts/rns_logo_preview.png" alt="Reticulum Network Stack" width="128">
+  <img src="scripts/rns_logo.png" alt="Reticulum Network Stack" width="256">
 </p>
 
 # Reticulum for Android
