@@ -45,7 +45,6 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -140,21 +139,14 @@ fun InterfacesScreen(
             .groupBy { it.parentInterfaceName!! }
     }
 
-    Scaffold(
-        floatingActionButton = {
-            FloatingActionButton(onClick = { showTypeSelector = true }) {
-                Icon(Icons.Default.Add, contentDescription = "Add Interface")
-            }
-        },
-    ) { innerPadding ->
+    Box(modifier = Modifier.fillMaxSize()) {
         val hasSharedInstance = isRunning && sharedInstanceServer != null
         val hasContent = interfaces.isNotEmpty() || hasSharedInstance
 
         if (!hasContent) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
+                    .fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -174,7 +166,6 @@ fun InterfacesScreen(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -353,6 +344,15 @@ fun InterfacesScreen(
 
                 item { Spacer(Modifier.height(80.dp)) }
             }
+        }
+
+        FloatingActionButton(
+            onClick = { showTypeSelector = true },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp),
+        ) {
+            Icon(Icons.Default.Add, contentDescription = "Add Interface")
         }
     }
 
