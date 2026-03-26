@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="scripts/rns_logo_preview.png" alt="Reticulum Network Stack" width="128">
+</p>
+
 # Reticulum for Android
 
 A shared instance daemon for [Reticulum](https://reticulum.network/) on Android. Runs the [reference Python implementation](https://github.com/markqvist/Reticulum) via [Chaquopy](https://chaquo.com/chaquopy/) as a background service, so other Reticulum apps on the device can share a single network stack without each needing to bundle their own.
