@@ -159,4 +159,7 @@ dependencies {
 
     // DataStore
     implementation(libs.datastore)
+
+    // Test
+    testImplementation("junit:junit:4.13.2")
 }
