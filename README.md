@@ -20,6 +20,14 @@ Reticulum is a cryptography-based networking protocol for building resilient, de
 - Live interface stats and traffic monitoring
 - Auto-discovery of peers on local networks
 
+## Work in Progress
+Not all features of RNS are fully tested in Reticulum for Android. Notably, the following features need further testing before being relied upon:
+- Blackhole Management
+- Interface Discovery
+
+## Missing Interfaces
+Generally speaking, any interface which uses pyjnius in Sideband requires a bridge to Kotlin code to work in chaquopy. On initial release, this app includes a bluetooth and usb bridge for RNode, but not a serial interface. 
+
 ## Requirements
 
 - Android 8.0+ (API 26)
