@@ -108,24 +108,35 @@ fun InterfacesScreen(
     val sharedInstanceServer = remember(liveStats) {
         liveStats.firstOrNull {
             it.name !in configuredNames &&
-                (it.displayName.contains("LocalServer", ignoreCase = true) ||
+                (it.displayName.contains("Shared Instance", ignoreCase = true) ||
+                    it.displayName.contains("LocalServer", ignoreCase = true) ||
                     it.type.contains("LocalServerInterface", ignoreCase = true))
         }
     }
 
     // Spawned clients connected to shared instance (LocalClientInterface)
-    val spawnedClients = remember(liveStats, configuredNames) {
+    // RNS reports these as "LocalInterface[port]" with parent = shared instance name
+    val sharedInstanceName = sharedInstanceServer?.name
+    val spawnedClients = remember(liveStats, configuredNames, sharedInstanceName) {
         liveStats.filter {
             it.name !in configuredNames &&
-                (it.displayName.contains("LocalClient", ignoreCase = true) ||
+                (it.parentInterfaceName == sharedInstanceName && sharedInstanceName != null ||
+                    it.displayName.contains("LocalClient", ignoreCase = true) ||
+                    it.displayName.contains("LocalInterface", ignoreCase = true) ||
                     it.type.contains("LocalClientInterface", ignoreCase = true))
         }
     }
 
     // Spawned peers grouped by parent interface name (e.g. AutoInterface peers)
-    val spawnedPeersByParent = remember(liveStats, configuredNames) {
+    // Exclude local clients (already shown under shared instance)
+    val localClientNames = remember(spawnedClients) { spawnedClients.map { it.name }.toSet() }
+    val spawnedPeersByParent = remember(liveStats, configuredNames, localClientNames) {
         liveStats
-            .filter { it.parentInterfaceName != null && it.name !in configuredNames }
+            .filter {
+                it.parentInterfaceName != null &&
+                    it.name !in configuredNames &&
+                    it.name !in localClientNames
+            }
             .groupBy { it.parentInterfaceName!! }
     }
 
@@ -744,11 +755,11 @@ private fun SpawnedClientCard(stats: InterfaceStats) {
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = stats.name.ifEmpty { stats.displayName },
+                    text = stats.displayName.ifEmpty { stats.name },
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
-                    text = "Connected Client",
+                    text = "Local Client",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

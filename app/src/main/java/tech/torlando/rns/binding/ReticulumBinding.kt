@@ -148,6 +148,11 @@ class ReticulumBinding(private val storagePath: String, private val context: Con
             interfaces.map { iface ->
                 val rawName = iface.get("name")?.toString() ?: ""
                 val displayName = iface.callAttr("__str__").toString()
+                val typeStr = try {
+                    iface.type().get("TYPE")?.toString() ?: ""
+                } catch (_: Exception) {
+                    iface.get("TYPE")?.toString() ?: ""
+                }
                 val parentName = try {
                     iface.get("parent_interface")?.get("name")?.toString()
                 } catch (_: Exception) { null }
@@ -160,7 +165,7 @@ class ReticulumBinding(private val storagePath: String, private val context: Con
                     reconnecting = try { iface.get("reconnecting")?.toBoolean() ?: false } catch (_: Exception) { false },
                     neverConnected = try { iface.get("never_connected")?.toBoolean() ?: false } catch (_: Exception) { false },
                     detached = try { iface.get("detached")?.toBoolean() ?: false } catch (_: Exception) { false },
-                    type = iface.get("TYPE")?.toString() ?: "",
+                    type = typeStr,
                     parentInterfaceName = parentName,
                 )
             }
