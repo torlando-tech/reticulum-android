@@ -101,13 +101,14 @@ class TransportService : Service() {
             }
             else -> {
                 // Null intent = system restart via START_STICKY
-                if (!tryStartForeground("Restarting...")) return START_NOT_STICKY
                 val savedConfig = readSavedConfig()
-                if (savedConfig != null) {
-                    executor.execute { doStart(savedConfig) }
-                } else {
+                if (savedConfig == null) {
+                    // Intentional stop — config was deleted, don't restart
                     stopSelf()
+                    return START_NOT_STICKY
                 }
+                if (!tryStartForeground("Restarting...")) return START_NOT_STICKY
+                executor.execute { doStart(savedConfig) }
             }
         }
         return START_STICKY
@@ -197,6 +198,10 @@ class TransportService : Service() {
         }
         binding = null
         releaseWakeLock()
+
+        // Remove the foreground notification before killing the process
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
 
         Log.i(TAG, "Transport stopped, exiting process")
         System.exit(0)
