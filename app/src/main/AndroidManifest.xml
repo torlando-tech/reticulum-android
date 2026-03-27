@@ -10,7 +10,7 @@
 
     <!-- Foreground Service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
@@ -61,7 +61,11 @@
             android:name=".service.TransportService"
             android:exported="false"
             android:process=":rns"
-            android:foregroundServiceType="dataSync|connectedDevice" />
+            android:foregroundServiceType="specialUse|connectedDevice">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Runs the Reticulum network stack as a shared instance for other apps" />
+        </service>
 
     </application>
 
