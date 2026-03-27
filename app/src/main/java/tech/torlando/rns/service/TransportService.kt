@@ -7,7 +7,9 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.app.ForegroundServiceStartNotAllowedException
 import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
@@ -95,33 +97,43 @@ class TransportService : Service() {
                 executor.execute { doStop() }
             }
             ACTION_START -> {
-                startForeground(
-                    NOTIFICATION_ID,
-                    createNotification("Starting..."),
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-                )
+                if (!tryStartForeground("Starting...")) return START_NOT_STICKY
             }
             else -> {
                 // Null intent = system restart via START_STICKY
-                try {
-                    startForeground(
-                        NOTIFICATION_ID,
-                        createNotification("Restarting..."),
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-                    )
-                    val savedConfig = readSavedConfig()
-                    if (savedConfig != null) {
-                        executor.execute { doStart(savedConfig) }
-                    } else {
-                        stopSelf()
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Cannot restart from background, stopping", e)
+                if (!tryStartForeground("Restarting...")) return START_NOT_STICKY
+                val savedConfig = readSavedConfig()
+                if (savedConfig != null) {
+                    executor.execute { doStart(savedConfig) }
+                } else {
                     stopSelf()
                 }
             }
         }
         return START_STICKY
+    }
+
+    private fun tryStartForeground(status: String): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    createNotification(status),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, createNotification(status))
+            }
+            true
+        } catch (e: ForegroundServiceStartNotAllowedException) {
+            Log.e(TAG, "Cannot start foreground service", e)
+            stopSelf()
+            false
+        } catch (e: Exception) {
+            Log.e(TAG, "Unexpected error starting foreground", e)
+            stopSelf()
+            false
+        }
     }
 
     override fun onDestroy() {
